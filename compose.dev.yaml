@@ -112,7 +112,8 @@ services:
       - .:/src:ro
       - go-mod-cache:/go/pkg/mod
     tmpfs:
-      - /tmp
+      # "exec": Go compiles the test binary into /tmp and must be able to run it.
+      - /tmp:exec
 
 networks:
   # Private bridge network: only the containers of this project are on it.
