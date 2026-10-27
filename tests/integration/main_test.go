@@ -59,6 +59,10 @@ func run(m *testing.M) int {
 		fmt.Fprintln(os.Stderr, "integration tests: cannot reset the simulation:", err)
 		return 2
 	}
+	if err := requireMetricUnits(ctx); err != nil {
+		fmt.Fprintln(os.Stderr, "integration tests: ", err)
+		return 2
+	}
 	code := m.Run()
 
 	resetCtx, resetCancel := context.WithTimeout(context.Background(), requestTimeout)

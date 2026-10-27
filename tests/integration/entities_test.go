@@ -80,3 +80,34 @@ func TestStates_listsEveryVirtualEntity(t *testing.T) {
 		}
 	}
 }
+
+// Regression test for the failure seen when the onboarding UI switched the
+// development instance to US customary units: Home Assistant then reported
+// 21.5 C as "70.7 F" and 31.2 C as "88.16 F". The reset script must re-apply
+// the pinned metric system, and temperatures must be reported in degrees
+// Celsius with the expected values (the expectations are not relaxed).
+func TestUnits_resetRestoresMetric_afterTheInstanceWasSwitchedToUSCustomary(t *testing.T) {
+	t.Cleanup(func() { resetSimulation(t) })
+	if err := wsCommand(context.Background(), map[string]any{"type": "config/core/update", "unit_system": "us_customary"}); err != nil {
+		t.Fatalf("switch to US customary: %v", err)
+	}
+	unit, err := target.admin.temperatureUnit(context.Background())
+	if err != nil || unit != "\u00b0F" {
+		t.Fatalf("precondition: instance temperature unit = %q (%v), want \u00b0F", unit, err)
+	}
+
+	resetSimulation(t)
+	if err := target.admin.runScript(context.Background(), "nepthass_dev_scenario_high_temperature"); err != nil {
+		t.Fatal(err)
+	}
+
+	unit, err = target.admin.temperatureUnit(context.Background())
+	if err != nil || unit != "\u00b0C" {
+		t.Errorf("after reset the instance temperature unit = %q (%v), want \u00b0C", unit, err)
+	}
+	waitForState(t, temperature, "31.2")
+	st, err := target.admin.state(context.Background(), temperature)
+	if err != nil || st.Attributes["unit_of_measurement"] != "\u00b0C" {
+		t.Errorf("temperature sensor = %+v (%v), want unit \u00b0C", st, err)
+	}
+}

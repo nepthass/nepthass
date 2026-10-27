@@ -22,6 +22,10 @@ The light and switch are real template entities. `light.turn_on`, `light.turn_of
 
 Every virtual sensor also becomes `unavailable` while its offline helper is on (see below), which is what a real device that lost its connection looks like.
 
+### Units
+
+Home Assistant converts temperature sensors to the instance's unit system, so on a US customary instance the temperature sensor would report `70.7 °F` instead of `21.5 °C`. The development configuration pins `unit_system: metric`, but the onboarding UI can switch a running instance to US customary until its next restart. The `NeptHass Dev: reset to baseline` script therefore re-applies the pinned metric system (`homeassistant.reload_core_config`) and refreshes the numeric sensors, and the integration tests refuse to run on a non-metric instance.
+
 ### Baseline and restarts
 
 Every helper has an `initial` value, so the whole simulation returns to the baseline above each time Home Assistant restarts. You can also return to it at any time with the `NeptHass Dev: reset to baseline` script.
