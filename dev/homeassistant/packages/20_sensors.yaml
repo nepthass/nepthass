@@ -1,0 +1,59 @@
+# Virtual read-only sensors driven by the simulation helpers.
+#
+# Binary sensors: "on" means the condition is active (motion detected, door or
+# window open, water detected). Each sensor becomes "unavailable" while its
+# matching nepthass_dev_offline_* helper is on, like a real device that lost
+# its connection.
+
+template:
+  - binary_sensor:
+      - name: NeptHass Dev Motion
+        unique_id: nepthass_dev_motion
+        default_entity_id: binary_sensor.nepthass_dev_motion
+        device_class: motion
+        state: "{{ is_state('input_boolean.nepthass_dev_sim_motion', 'on') }}"
+        availability: "{{ is_state('input_boolean.nepthass_dev_offline_motion', 'off') }}"
+      - name: NeptHass Dev Door
+        unique_id: nepthass_dev_door
+        default_entity_id: binary_sensor.nepthass_dev_door
+        device_class: door
+        state: "{{ is_state('input_boolean.nepthass_dev_sim_door_open', 'on') }}"
+        availability: "{{ is_state('input_boolean.nepthass_dev_offline_door', 'off') }}"
+      - name: NeptHass Dev Window
+        unique_id: nepthass_dev_window
+        default_entity_id: binary_sensor.nepthass_dev_window
+        device_class: window
+        state: "{{ is_state('input_boolean.nepthass_dev_sim_window_open', 'on') }}"
+        availability: "{{ is_state('input_boolean.nepthass_dev_offline_window', 'off') }}"
+      - name: NeptHass Dev Water Leak
+        unique_id: nepthass_dev_water_leak
+        default_entity_id: binary_sensor.nepthass_dev_water_leak
+        device_class: moisture
+        state: "{{ is_state('input_boolean.nepthass_dev_sim_leak', 'on') }}"
+        availability: "{{ is_state('input_boolean.nepthass_dev_offline_leak', 'off') }}"
+
+  - sensor:
+      - name: NeptHass Dev Temperature
+        unique_id: nepthass_dev_temperature
+        default_entity_id: sensor.nepthass_dev_temperature
+        device_class: temperature
+        state_class: measurement
+        unit_of_measurement: "\u00b0C"
+        state: "{{ states('input_number.nepthass_dev_sim_temperature') | float(0) }}"
+        availability: "{{ is_state('input_boolean.nepthass_dev_offline_temperature', 'off') }}"
+      - name: NeptHass Dev Humidity
+        unique_id: nepthass_dev_humidity
+        default_entity_id: sensor.nepthass_dev_humidity
+        device_class: humidity
+        state_class: measurement
+        unit_of_measurement: "%"
+        state: "{{ states('input_number.nepthass_dev_sim_humidity') | float(0) | round(0) | int }}"
+        availability: "{{ is_state('input_boolean.nepthass_dev_offline_humidity', 'off') }}"
+      - name: NeptHass Dev Battery
+        unique_id: nepthass_dev_battery
+        default_entity_id: sensor.nepthass_dev_battery
+        device_class: battery
+        state_class: measurement
+        unit_of_measurement: "%"
+        state: "{{ states('input_number.nepthass_dev_sim_battery') | float(0) | round(0) | int }}"
+        availability: "{{ is_state('input_boolean.nepthass_dev_offline_battery', 'off') }}"

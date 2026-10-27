@@ -1,0 +1,136 @@
+# One-click simulation scenarios for the sensors NeptHass will monitor in
+# upcoming milestones. Run them from the "NeptHass Dev" dashboard, from
+# Developer Tools > Actions, or through the REST API:
+#   POST /api/services/script/<script name>
+# Each scenario only changes simulation helpers; nothing touches real devices.
+
+script:
+  nepthass_dev_scenario_reset:
+    alias: "NeptHass Dev: reset to baseline"
+    icon: mdi:restore
+    description: "Everything off/closed/dry, 21.5 C, 45 %, battery 87 %, all sensors online."
+    mode: single
+    sequence:
+      - action: input_boolean.turn_off
+        target:
+          entity_id:
+            - input_boolean.nepthass_dev_light_backing
+            - input_boolean.nepthass_dev_switch_backing
+            - input_boolean.nepthass_dev_sim_motion
+            - input_boolean.nepthass_dev_sim_door_open
+            - input_boolean.nepthass_dev_sim_window_open
+            - input_boolean.nepthass_dev_sim_leak
+            - input_boolean.nepthass_dev_offline_motion
+            - input_boolean.nepthass_dev_offline_door
+            - input_boolean.nepthass_dev_offline_window
+            - input_boolean.nepthass_dev_offline_temperature
+            - input_boolean.nepthass_dev_offline_humidity
+            - input_boolean.nepthass_dev_offline_leak
+            - input_boolean.nepthass_dev_offline_battery
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.nepthass_dev_sim_temperature
+        data:
+          value: 21.5
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.nepthass_dev_sim_humidity
+        data:
+          value: 45
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.nepthass_dev_sim_battery
+        data:
+          value: 87
+
+  nepthass_dev_scenario_motion_detected:
+    alias: "NeptHass Dev: motion detected"
+    icon: mdi:motion-sensor
+    description: "Motion sensor goes inactive to active."
+    mode: single
+    sequence:
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.nepthass_dev_sim_motion
+
+  nepthass_dev_scenario_door_opened:
+    alias: "NeptHass Dev: door opened"
+    icon: mdi:door-open
+    description: "Door sensor reports open."
+    mode: single
+    sequence:
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.nepthass_dev_sim_door_open
+
+  nepthass_dev_scenario_window_opened:
+    alias: "NeptHass Dev: window opened"
+    icon: mdi:window-open
+    description: "Window sensor reports open."
+    mode: single
+    sequence:
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.nepthass_dev_sim_window_open
+
+  nepthass_dev_scenario_high_temperature:
+    alias: "NeptHass Dev: high temperature (31.2 C)"
+    icon: mdi:thermometer-alert
+    description: "Temperature rises above a 30 C threshold."
+    mode: single
+    sequence:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.nepthass_dev_sim_temperature
+        data:
+          value: 31.2
+
+  nepthass_dev_scenario_water_leak:
+    alias: "NeptHass Dev: water leak detected"
+    icon: mdi:water-alert
+    description: "Water leak sensor reports wet."
+    mode: single
+    sequence:
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.nepthass_dev_sim_leak
+
+  nepthass_dev_scenario_low_battery:
+    alias: "NeptHass Dev: low battery (12 %)"
+    icon: mdi:battery-alert
+    description: "Battery sensor falls to 12 percent."
+    mode: single
+    sequence:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.nepthass_dev_sim_battery
+        data:
+          value: 12
+
+  nepthass_dev_scenario_sensors_offline:
+    alias: "NeptHass Dev: all sensors offline"
+    icon: mdi:wifi-off
+    description: "Every virtual sensor becomes unavailable."
+    mode: single
+    sequence:
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.nepthass_dev_offline_motion
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.nepthass_dev_offline_door
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.nepthass_dev_offline_window
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.nepthass_dev_offline_temperature
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.nepthass_dev_offline_humidity
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.nepthass_dev_offline_leak
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.nepthass_dev_offline_battery

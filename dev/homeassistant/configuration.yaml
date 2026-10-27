@@ -1,0 +1,42 @@
+# NeptHass DEVELOPMENT Home Assistant configuration.
+#
+# Mounted read-only into the development container by compose.dev.yaml. It
+# defines virtual devices only (no real hardware, no cloud, no discovery).
+# Home Assistant's own data (users, tokens, database) lives in the project's
+# ha-config volume, never in this repository.
+#
+# After editing a file under dev/homeassistant, restart Home Assistant:
+#   docker compose --env-file .env.dev -f compose.dev.yaml restart homeassistant
+# Docs: docs/development/virtual-devices.md
+
+homeassistant:
+  name: NeptHass Dev
+  unit_system: metric
+  time_zone: UTC
+  # Deliberately not a real location.
+  latitude: 0
+  longitude: 0
+  elevation: 0
+  packages: !include_dir_named packages
+
+# A minimal set of integrations instead of default_config: faster start, no
+# network discovery, no cloud, no extra downloads.
+frontend:
+config:
+http:
+history:
+logbook:
+recorder:
+  purge_keep_days: 3
+
+logger:
+  default: info
+
+lovelace:
+  dashboards:
+    nepthass-dev:
+      mode: yaml
+      title: NeptHass Dev
+      icon: mdi:flask-outline
+      show_in_sidebar: true
+      filename: dashboards/nepthass-dev.yaml
