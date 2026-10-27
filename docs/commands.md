@@ -5,8 +5,9 @@ All replies are ephemeral (only the person who ran the command sees them) and ne
 | Command | Who | Purpose |
 | --- | --- | --- |
 | [`/ping`](#ping) | users | Check the bot responds |
-| [`/health`](#health) | users | Discord, Home Assistant and database status |
+| [`/health`](#health) | users | Discord, Home Assistant, live monitoring and database status |
 | [`/devices`](#devices) | users | List the entities shared with you |
+| [`/sensors`](#sensors) | users | Live readings of the monitored sensors shared with you |
 | [`/status`](#status) | users | Show a shared entity's state |
 | [`/control`](#control) | users | Turn a shared light or switch on or off |
 | [`/setup`](#setup) | administrators | Interactive wizard: discover, share and name entities |
@@ -26,11 +27,32 @@ Replies with the Discord gateway latency.
 
 ## /health
 
-Discord gateway, Home Assistant REST API (with its version) and the database. The Home Assistant WebSocket line says it is not available: monitoring arrives in v0.3.0.
+Discord gateway, Home Assistant REST API (with its version) and the database. A fourth line, **Home Assistant WebSocket (live monitoring)**, reports the real-time connection. It lists five layers separately (Transport, Authenticated, Subscribed, Snapshot, and proof of life) and shows **Healthy** only when all of them hold:
+
+- **Healthy: N sensors tracked, synchronized ..., last event ...**: connected, subscribed, synchronized and receiving.
+- **Starting (synchronizing)** and similar: not healthy yet. A connected, authenticated, subscribed monitor without a snapshot is not healthy.
+- **Connected but silent**: nothing has been received recently; values may be outdated.
+- **Cannot reach Home Assistant's WebSocket; retrying, next attempt ...**: the connection is down and will retry with backoff.
+- **Home Assistant rejected the access token for the WebSocket (check HA_TOKEN)**: a credential problem, retried slowly.
+- **Unexpected response from Home Assistant's WebSocket; retrying**: a protocol problem.
+
+It also shows the reconnect count and the number of invalid messages ignored. It never shows the Home Assistant URL, the token or raw error text. Monitoring problems do not stop `/devices`, `/status` or `/control`, which use the REST API.
 
 ## /devices
 
 `/devices [page]` lists the entities you may see, 10 per page, with live state, your access level (`read` or `control`) and the alias if one is set. Entities Home Assistant no longer reports are marked "not found in Home Assistant". Unavailable and unknown states are spelled out as "not reporting", never as off or safe.
+
+## /sensors
+
+`/sensors [page]` (users) lists, ten per page, the monitored sensors that are shared with you at `read` or `control`, sorted by name. Each line shows the alias (or Home Assistant's friendly name), the entity ID, the category, the interpreted state, and when it last changed:
+
+- Numeric sensors show the value with Home Assistant's unit (`21.5 °C`).
+- Binary sensors show the meaning with the raw state: a door with raw `on` is *open (on)*, motion `on` is *motion detected (on)*, a moisture sensor `on` is *water detected (on)*, a battery sensor `on` is *low (on)*.
+- `unavailable` and `unknown` are shown as *not reporting* with a warning icon, and an unexpected value as *invalid value*; they are never shown as closed, clear or dry.
+
+When live monitoring is not healthy, an amber banner says the values are the last known ones and may be outdated, and every line carries a warning icon. The permission is checked again on every call: revoking a share removes the sensor from the very next `/sensors`. Entities that are not monitored sensors (lights, switches, other sensor types) are not listed here; use `/devices` and `/status`. For an authoritative read of one entity, `/status` queries Home Assistant directly.
+
+Supported kinds: temperature, humidity, battery level and battery low, motion, door, window and water leak.
 
 ## /status
 

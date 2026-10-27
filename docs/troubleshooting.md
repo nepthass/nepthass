@@ -80,6 +80,19 @@ The limit is 6 commands per 10 seconds per user (setup wizard clicks have their 
 
 `/control` reports that Home Assistant accepted the command; devices (especially Zigbee) can take a moment to report back. Run `/status` again. If the device never responds, check it in Home Assistant itself; NeptHass only forwards commands.
 
+## Live monitoring problems
+
+`/health` shows the state of live monitoring on its "Home Assistant WebSocket (live monitoring)" line. Commands that use REST (`/devices`, `/status`, `/control`) work even when monitoring is down.
+
+- **"Cannot reach Home Assistant's WebSocket; retrying".** The WebSocket cannot be opened or was lost. Check that Home Assistant is running and reachable at `HA_URL` from the NeptHass container (see the networking notes in [setup.md](setup.md)), and that a reverse proxy forwards WebSocket upgrades on `/api/websocket`. NeptHass retries on its own (1 s growing to 60 s) and resynchronizes when it succeeds.
+- **"Home Assistant rejected the access token for the WebSocket".** The token was revoked or replaced after start. Create a new Long-Lived Access Token, update `HA_TOKEN` (or its file) and restart. Retries are deliberately slow (30 s up to 10 minutes) so a bad token never hammers Home Assistant.
+- **"Unexpected response from Home Assistant's WebSocket".** A proxy or an unsupported server answered in a way NeptHass could not use. Look for messages over 16 MiB (a very large installation) or a proxy that rewrites WebSocket frames.
+- **"Connected but silent".** The connection is open but nothing arrived within 90 seconds, even the ping replies. NeptHass closes and reconnects by itself; if it persists, check the network path.
+- **"Starting (synchronizing)" that never finishes.** The snapshot is being fetched. If it repeats, the snapshot is probably too large (over 16 MiB) or Home Assistant is overloaded.
+- **`/sensors` is empty.** Only sensors that are shared with you (`/setup` or `/permissions allow`) and are one of the monitored kinds appear: temperature, humidity, battery, motion, door, window, water leak, identified by their Home Assistant device class. A sensor without a device class is not tracked.
+- **A sensor looks "stale".** Every line gets a warning icon and a banner while monitoring is not healthy. The values are the last known ones, not current.
+- **The log.** Look for `home assistant websocket authenticated`, `event subscription active`, `initial synchronization completed` and `connection lost; reconnect scheduled` (with the failure category and delay). Raw payloads and tokens are never logged.
+
 ## Still stuck
 
 Open an issue with the NeptHass version (`docker run --rm nepthass:latest version`), the relevant log lines, and your deployment type. Redact tokens, IDs you consider private, and entity names. For security problems use [SECURITY.md](../SECURITY.md) instead.

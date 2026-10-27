@@ -10,17 +10,27 @@ NeptHass does not replace Home Assistant and has no device drivers. It works thr
 
 ## Project status
 
-NeptHass is being built milestone by milestone. v0.1.0 (Foundation) and v0.2.0 (Interactive Setup) are implemented. Nothing below is advertised unless it is implemented and verified.
+NeptHass is being built milestone by milestone. v0.1.0 (Foundation) and v0.2.0 (Interactive Setup) are released. v0.3.0 (Sensor Monitoring) is implemented and awaiting manual acceptance; it is not released. Nothing below is advertised unless it is implemented and verified.
 
 | Milestone | Scope | Status |
 | --- | --- | --- |
 | v0.1.0 | Foundation: configuration, Discord connection, Home Assistant REST client, SQLite, authorization, basic commands, Docker | **Implemented** |
 | v0.2.0 | Interactive `/setup` wizard, entity discovery, aliases, persistent setup sessions, `/sync` | **Implemented** |
-| v0.3.0 | Home Assistant WebSocket, real-time sensor monitoring, reconnection and reconciliation | Planned |
+| v0.3.0 | Home Assistant WebSocket, real-time sensor monitoring, reconnection and reconciliation | **Implemented, unreleased** (manual acceptance pending) |
 | v0.4.0 | Smart notifications (motion, door/window, leak, battery), cooldowns, outbox | Planned |
 | v0.5.0 | Rules engine: thresholds, durations, quiet hours, hysteresis | Planned |
 | v0.6.0 | Interactive `/home` dashboard | Planned |
 | v1.0.0 | Stable release: hardening, release workflow, full docs | Planned |
+
+### What v0.3.0 adds
+
+- A persistent, authenticated connection to the Home Assistant WebSocket API that receives `state_changed` events in real time and tracks the state of temperature, humidity, battery, motion, door, window and water-leak sensors (classified by Home Assistant's domain and device class, never by entity-ID text).
+- Safe recovery: bounded, jittered reconnection backoff (a rejected token retries slowly, never in a hot loop), a fresh authoritative snapshot after every reconnect, no duplicate subscriptions, and a clean stop on shutdown.
+- Honest health: `/health` reports transport, authentication, subscription, snapshot and proof of life separately, and only calls monitoring healthy when all of them hold.
+- `/sensors`: live, interpreted readings of the sensors shared with you (`on` for a door means *open*, for motion *detected*), clearly marked as stale when monitoring is down. Access is re-checked on every read, so revoking a share takes effect immediately.
+- Live state is kept in memory only: no new tables, no migration, no new settings.
+
+Monitoring **observes only**: it sends no notifications and has no rules; those are v0.4.0 and v0.5.0. Details: [docs/design/sensor-monitoring.md](docs/design/sensor-monitoring.md).
 
 ### What v0.2.0 adds
 
@@ -45,12 +55,12 @@ Details: [docs/commands.md](docs/commands.md), [docs/design/interactive-setup.md
 
 ### What does not exist yet
 
-No sensor monitoring or Home Assistant WebSocket, no alerts or notifications, no rules, no `/home` dashboard, no `/sensors`, `/alerts` or `/settings` commands. Discord notifications, when they arrive, will be best-effort and must not be relied on as an emergency alarm. The setup wizard is covered by automated tests (simulated Discord interactions against a real Home Assistant) and was checked by the maintainer on a live Discord server; those manual results are user-reported and listed in [docs/development/smoke-tests.md](docs/development/smoke-tests.md).
+No alerts or notifications (monitoring only observes: it never messages anyone), no rules, no `/home` dashboard, no `/alerts` or `/settings` commands. Discord notifications, when they arrive, will be best-effort and must not be relied on as an emergency alarm. The setup wizard is covered by automated tests (simulated Discord interactions against a real Home Assistant) and was checked by the maintainer on a live Discord server; those manual results are user-reported and listed in [docs/development/smoke-tests.md](docs/development/smoke-tests.md).
 
 ## How it works
 
 ```text
-Discord  <-- gateway (outbound) -->  NeptHass  <-- REST (local) -->  Home Assistant  <-->  devices
+Discord  <-- gateway (outbound) -->  NeptHass  <-- REST + WebSocket (local) -->  Home Assistant  <-->  devices
                                         |
                                      SQLite (/data)
 ```
@@ -87,8 +97,9 @@ The full walkthrough, bridge-network setup and secret files are in [docs/setup.m
 | Command | Who | What it does |
 | --- | --- | --- |
 | `/ping` | users | Check the bot responds; shows gateway latency |
-| `/health` | users | Discord, Home Assistant REST and database status |
+| `/health` | users | Discord, Home Assistant REST, live monitoring (WebSocket) and database status |
 | `/devices [page]` | users | List the entities shared with you (10 per page) |
+| `/sensors [page]` | users | Live readings of the monitored sensors shared with you (10 per page) |
 | `/status entity` | users | Show an entity's state (needs `read` or `control` access) |
 | `/control entity action` | users | Turn a light or switch on or off (needs `control` access) |
 | `/permissions allow|revoke|list` | admins | Manage which entities are shared and at what level |
@@ -115,9 +126,11 @@ All bootstrap settings are environment variables (see [.env.example](.env.exampl
 | `AUDIT_RETENTION_DAYS` | no | `90` | Audit log retention (1 to 3650) |
 | `LOG_LEVEL` / `LOG_FORMAT` | no | `info` / `text` | `debug`..`error`; `text` or `json` |
 
+`HA_URL` is also used for the WebSocket (`http` becomes `ws`, `https` becomes `wss`, a path prefix is kept), so live monitoring needs no extra setting. If Home Assistant is behind a reverse proxy it must allow WebSocket upgrades on `/api/websocket`.
+
 ## Security
 
-Read-only by default, an explicit per-entity allowlist, control limited to `light` and `switch`, administrator and guild allowlists checked on every interaction, secrets redacted from logs, no listening ports. Details and hardening advice: [docs/security.md](docs/security.md). Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+Read-only by default, an explicit per-entity allowlist, control limited to `light` and `switch`, administrator and guild allowlists checked on every interaction, secrets redacted from logs, no listening ports, live sensor data readable only through a per-read permission check. Details and hardening advice: [docs/security.md](docs/security.md). Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
 ## Development
 
