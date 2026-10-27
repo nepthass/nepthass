@@ -15,6 +15,7 @@ import (
 	"github.com/nepthass/nepthass/internal/config"
 	"github.com/nepthass/nepthass/internal/entities"
 	"github.com/nepthass/nepthass/internal/homeassistant/rest"
+	"github.com/nepthass/nepthass/internal/setup"
 	"github.com/nepthass/nepthass/internal/storage"
 )
 
@@ -39,11 +40,14 @@ var (
 // stack is NeptHass's real service layer wired to the real Home Assistant and a
 // real (temporary) SQLite database.
 type stack struct {
-	db    *sql.DB
-	ha    *rest.Client
-	svc   *entities.Service
-	perms *entities.Permissions
-	audit *audit.Log
+	db      *sql.DB
+	ha      *rest.Client
+	svc     *entities.Service
+	perms   *entities.Permissions
+	aliases *entities.Aliases
+	disc    *entities.Discovery
+	setup   *setup.Service
+	audit   *audit.Log
 }
 
 func newStack(t *testing.T) stack {
@@ -60,9 +64,13 @@ func openStack(t *testing.T, path string) stack {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	ha := rest.New(config.HomeAssistant{URL: target.url, Token: config.Secret(target.token), Timeout: requestTimeout})
-	s := stack{db: db, ha: ha, perms: entities.NewPermissions(db), audit: audit.New(db)}
+	s := stack{db: db, ha: ha, perms: entities.NewPermissions(db), aliases: entities.NewAliases(db), audit: audit.New(db)}
 	s.svc = entities.NewService(entities.Deps{
-		HA: ha, Permissions: s.perms, Aliases: entities.NewAliases(db), Audit: s.audit, Logger: slog.New(slog.DiscardHandler), Now: time.Now,
+		HA: ha, Permissions: s.perms, Aliases: s.aliases, Audit: s.audit, Logger: slog.New(slog.DiscardHandler), Now: time.Now,
+	})
+	s.disc = entities.NewDiscovery(entities.DiscoveryDeps{HA: ha, DB: db, Permissions: s.perms, Now: time.Now})
+	s.setup = setup.NewService(setup.Deps{
+		DB: db, Store: setup.NewStore(db), Discovery: s.disc, Permissions: s.perms, Aliases: s.aliases, Audit: s.audit, Now: time.Now,
 	})
 	return s
 }
