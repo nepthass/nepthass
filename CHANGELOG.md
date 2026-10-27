@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-27
+
+Second milestone: interactive setup.
+
+### Added
+
+- `/setup`: an administrator-only interactive wizard (connection health, discover devices, permissions, aliases, review, done) built on an explicit state machine, with search, domain and "shared only" filters, pagination, select menus, modals, Back / Next / Cancel / Resume and a confirmation before anything is written.
+- Persistent setup sessions in SQLite: survive restarts, resumable, 24 hour idle expiry, one active session per administrator and guild, optimistic concurrency, replay-safe confirmation, and atomic apply with audit entries (`setup.allow`, `setup.revoke`, `setup.alias`, `setup.apply`).
+- Aliases: human-readable, unique, character-restricted names for entities, shown in `/devices` and `/status`, accepted by `/status` and `/control` (and suggested by autocomplete), never granting access and never revealing aliases of unshared entities.
+- `/sync`: refreshes the discovery snapshot and reports new, removed, returned and shared-but-missing or unavailable entities. It persists only entity IDs and first/last-seen times and never shares anything.
+- A shared discovery cache so paging and searching do not hit Home Assistant on every click.
+- Migration 0002 (`entity_aliases`, `setup_sessions`, `known_entities`); v0.1.0 databases upgrade in place with permissions and audit records preserved.
+- Component and modal handling in the bot, with a separate per-user click rate limit (30 per 10 seconds).
+- Integration tests for discovery, the full setup flow, stale confirmations, restart persistence and `/sync` against the real development Home Assistant; a command reference and a design document; a manual Discord checklist for the wizard.
+
+### Changed
+
+- `/permissions allow` and the wizard share one grant rule (`entities.CheckGrant`) and one permission table.
+- Shared Discord presentation helpers moved to `internal/discord/ui` (behavior unchanged).
+- Upgrade note: back up your data before upgrading; a v0.1.0 build refuses to start on a v0.2.0 database.
+
+### Fixed
+
+- Development environment: the integration tests failed (31.2 C reported as 88.16 F, 21.5 C as 70.7 F) when the onboarding UI switched the Home Assistant instance to US customary units. The reset script now re-applies the pinned metric system, the suite refuses to run on a non-metric instance, and a regression test covers it.
+
+### Known limitations
+
+- No sensor monitoring, Home Assistant WebSocket, notifications, rules or `/home` dashboard yet (planned for v0.3.0 to v0.6.0).
+- A single Discord guild is supported.
+- A setup session holds at most 100 selected entities, and entities whose ID is longer than 100 characters cannot be offered in the wizard's select menu.
+- Alias uniqueness is case-insensitive but not aware of visually confusable characters from different scripts.
+
 ## [0.1.0] - 2026-10-27
 
 First milestone: the foundation.
@@ -35,5 +67,6 @@ First milestone: the foundation.
 - A single Discord guild is supported.
 - `/devices` lists 10 entities per page via a `page` option; interactive pagination arrives with the dashboard.
 
-[Unreleased]: https://github.com/nepthass/nepthass/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/nepthass/nepthass/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/nepthass/nepthass/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/nepthass/nepthass/releases/tag/v0.1.0

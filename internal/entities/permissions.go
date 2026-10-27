@@ -65,16 +65,27 @@ type Grant struct {
 	At        time.Time
 }
 
+// queryer is satisfied by both *sql.DB and *sql.Tx, so the same store code runs
+// standalone or inside a larger transaction.
+type queryer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
 // Permissions stores the explicit entity allowlist in SQLite.
-type Permissions struct{ db *sql.DB }
+type Permissions struct{ q queryer }
 
 // NewPermissions returns a permission store backed by db.
-func NewPermissions(db *sql.DB) *Permissions { return &Permissions{db: db} }
+func NewPermissions(db *sql.DB) *Permissions { return &Permissions{q: db} }
+
+// WithTx returns a store whose operations run inside tx.
+func (p *Permissions) WithTx(tx *sql.Tx) *Permissions { return &Permissions{q: tx} }
 
 // Get returns the access level of an entity; AccessNone when no row exists.
 func (p *Permissions) Get(ctx context.Context, id ID) (Access, error) {
 	var access string
-	err := p.db.QueryRowContext(ctx, "SELECT access FROM entity_permissions WHERE entity_id = ?", string(id)).Scan(&access)
+	err := p.q.QueryRowContext(ctx, "SELECT access FROM entity_permissions WHERE entity_id = ?", string(id)).Scan(&access)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AccessNone, nil
 	}
@@ -86,7 +97,7 @@ func (p *Permissions) Get(ctx context.Context, id ID) (Access, error) {
 
 // Set inserts or updates the access level of an entity.
 func (p *Permissions) Set(ctx context.Context, g Grant) error {
-	_, err := p.db.ExecContext(ctx, `INSERT INTO entity_permissions (entity_id, access, granted_by, updated_at)
+	_, err := p.q.ExecContext(ctx, `INSERT INTO entity_permissions (entity_id, access, granted_by, updated_at)
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(entity_id) DO UPDATE SET access = excluded.access, granted_by = excluded.granted_by, updated_at = excluded.updated_at`,
 		string(g.ID), string(g.Access), g.GrantedBy, storage.FormatTime(g.At))
@@ -98,7 +109,7 @@ func (p *Permissions) Set(ctx context.Context, g Grant) error {
 
 // Revoke removes an entity from the allowlist and reports whether a row existed.
 func (p *Permissions) Revoke(ctx context.Context, id ID) (bool, error) {
-	res, err := p.db.ExecContext(ctx, "DELETE FROM entity_permissions WHERE entity_id = ?", string(id))
+	res, err := p.q.ExecContext(ctx, "DELETE FROM entity_permissions WHERE entity_id = ?", string(id))
 	if err != nil {
 		return false, fmt.Errorf("revoke permission: %w", err)
 	}
@@ -111,7 +122,7 @@ func (p *Permissions) Revoke(ctx context.Context, id ID) (bool, error) {
 
 // List returns every entry ordered by entity ID.
 func (p *Permissions) List(ctx context.Context) ([]Permission, error) {
-	rows, err := p.db.QueryContext(ctx, "SELECT entity_id, access, granted_by, updated_at FROM entity_permissions ORDER BY entity_id")
+	rows, err := p.q.QueryContext(ctx, "SELECT entity_id, access, granted_by, updated_at FROM entity_permissions ORDER BY entity_id")
 	if err != nil {
 		return nil, fmt.Errorf("list permissions: %w", err)
 	}

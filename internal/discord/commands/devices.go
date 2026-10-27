@@ -9,6 +9,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/nepthass/nepthass/internal/auth"
+	"github.com/nepthass/nepthass/internal/discord/ui"
 	"github.com/nepthass/nepthass/internal/entities"
 )
 
@@ -47,35 +48,19 @@ func (r *Registry) devices(ctx context.Context, req Request) Reply {
 		b.WriteString(deviceLine(d))
 		b.WriteByte('\n')
 	}
-	e := newEmbed("Devices", b.String(), colorOK)
+	e := ui.Embed("Devices", b.String(), ui.ColorOK)
 	e.Footer = &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Page %d of %d - %d entities", result.Page, result.Pages, result.Total)}
 	return Reply{Embeds: []*discordgo.MessageEmbed{e}}
 }
 
 func deviceLine(d entities.Device) string {
 	if d.State == nil {
-		return fmt.Sprintf("%s `%s` - not found in Home Assistant", iconWarn, d.ID)
+		if d.Alias != "" {
+			return fmt.Sprintf("%s **%s** `%s` - not found in Home Assistant", ui.IconWarn, ui.Escape(d.Alias), d.ID)
+		}
+		return fmt.Sprintf("%s `%s` - not found in Home Assistant", ui.IconWarn, d.ID)
 	}
-	return fmt.Sprintf("%s **%s** `%s` - %s (%s)", stateIcon(*d.State), escape(d.State.FriendlyName()), d.ID, describeState(*d.State), d.Access)
-}
-
-func stateIcon(s entities.State) string {
-	if !s.Reliable() {
-		return iconWarn
-	}
-	return iconOK
-}
-
-// describeState renders the value with its unit; unavailable and unknown are
-// spelled out so they are never mistaken for an inactive or safe state.
-func describeState(s entities.State) string {
-	if !s.Reliable() {
-		return s.State + " (not reporting)"
-	}
-	if unit := s.Unit(); unit != "" {
-		return escape(s.State + " " + unit)
-	}
-	return escape(s.State)
+	return fmt.Sprintf("%s **%s** `%s` - %s (%s)", ui.StateIcon(*d.State), ui.Escape(d.State.DisplayName()), d.ID, ui.DescribeState(*d.State), d.Access)
 }
 
 func (r *Registry) cmdStatus() command {
@@ -91,7 +76,7 @@ func (r *Registry) cmdStatus() command {
 }
 
 func (r *Registry) status(ctx context.Context, req Request) Reply {
-	id, err := entities.ParseID(req.Args["entity"])
+	id, err := r.deps.Entities.Resolve(ctx, req.Actor, req.Args["entity"], entities.AccessRead)
 	if err != nil {
 		return r.fail(req, err)
 	}
@@ -99,19 +84,22 @@ func (r *Registry) status(ctx context.Context, req Request) Reply {
 	if err != nil {
 		return r.fail(req, err)
 	}
-	color := colorOK
+	color := ui.ColorOK
 	if !st.Reliable() {
-		color = colorWarn
+		color = ui.ColorWarn
 	}
-	e := newEmbed("Status", "**"+escape(st.FriendlyName())+"**", color)
+	e := ui.Embed("Status", "**"+ui.Escape(st.DisplayName())+"**", color)
 	e.Fields = []*discordgo.MessageEmbedField{
-		field("Entity", "`"+string(st.ID)+"`", true),
-		field("State", stateIcon(st)+" "+describeState(st), true),
+		ui.Field("Entity", "`"+string(st.ID)+"`", true),
+		ui.Field("State", ui.StateIcon(st)+" "+ui.DescribeState(st), true),
+	}
+	if st.Alias != "" {
+		e.Fields = append(e.Fields, ui.Field("Home Assistant name", ui.Escape(st.FriendlyName()), true))
 	}
 	if dc := st.DeviceClass(); dc != "" {
-		e.Fields = append(e.Fields, field("Device class", escape(dc), true))
+		e.Fields = append(e.Fields, ui.Field("Device class", ui.Escape(dc), true))
 	}
-	e.Fields = append(e.Fields, field("Last changed", relative(st.LastChanged), true))
+	e.Fields = append(e.Fields, ui.Field("Last changed", ui.Relative(st.LastChanged), true))
 	return Reply{Embeds: []*discordgo.MessageEmbed{e}}
 }
 
@@ -134,7 +122,7 @@ func (r *Registry) cmdControl() command {
 }
 
 func (r *Registry) control(ctx context.Context, req Request) Reply {
-	id, err := entities.ParseID(req.Args["entity"])
+	id, err := r.deps.Entities.Resolve(ctx, req.Actor, req.Args["entity"], entities.AccessControl)
 	if err != nil {
 		return r.fail(req, err)
 	}
@@ -146,14 +134,14 @@ func (r *Registry) control(ctx context.Context, req Request) Reply {
 	if err != nil {
 		return r.fail(req, err)
 	}
-	stateText := "State: " + describeState(res.Before)
+	stateText := "State: " + ui.DescribeState(res.Before)
 	if res.After != nil && res.After.State != res.Before.State {
-		stateText = "State: " + describeState(res.Before) + " \u2192 " + describeState(*res.After)
+		stateText = "State: " + ui.DescribeState(res.Before) + " \u2192 " + ui.DescribeState(*res.After)
 	} else {
 		stateText += " (Home Assistant has not reported a change yet; devices can take a moment)"
 	}
-	e := newEmbed("Command Sent", fmt.Sprintf("Turned **%s** `%s`.\n%s", action, id, stateText), colorOK)
-	e.Fields = []*discordgo.MessageEmbedField{field("Entity", escape(res.Before.FriendlyName()), false)}
+	e := ui.Embed("Command Sent", fmt.Sprintf("Turned **%s** `%s`.\n%s", action, id, stateText), ui.ColorOK)
+	e.Fields = []*discordgo.MessageEmbedField{ui.Field("Entity", ui.Escape(res.Before.DisplayName()), false)}
 	return Reply{Embeds: []*discordgo.MessageEmbed{e}}
 }
 
@@ -163,14 +151,19 @@ func (r *Registry) permitted(minimum entities.Access) completer {
 		if req.Focused != "entity" {
 			return nil
 		}
-		ids, err := r.deps.Entities.Suggest(ctx, req.Actor, minimum, req.Args["entity"])
+		suggestions, err := r.deps.Entities.Suggest(ctx, req.Actor, minimum, req.Args["entity"])
 		if err != nil {
 			r.deps.Logger.Debug("autocomplete failed", "command", req.Command, "error", err)
 			return nil
 		}
-		choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(ids))
-		for _, id := range ids {
-			choices = append(choices, choice(string(id), string(id)))
+		choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(suggestions))
+		for _, s := range suggestions {
+			label := string(s.ID)
+			if s.Alias != "" {
+				label = s.Alias + " (" + string(s.ID) + ")"
+			}
+			// The submitted value is always the canonical entity ID.
+			choices = append(choices, ui.Choice(label, string(s.ID)))
 		}
 		return choices
 	}

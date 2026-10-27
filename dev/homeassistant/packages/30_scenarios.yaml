@@ -11,6 +11,10 @@ script:
     description: "Everything off/closed/dry, 21.5 C, 45 %, battery 87 %, all sensors online."
     mode: single
     sequence:
+      # Re-apply the unit system pinned in configuration.yaml. The onboarding UI
+      # can switch an instance to US customary units, which makes Home Assistant
+      # convert temperature sensors to Fahrenheit.
+      - action: homeassistant.reload_core_config
       - action: input_boolean.turn_off
         target:
           entity_id:
@@ -42,6 +46,14 @@ script:
           entity_id: input_number.nepthass_dev_sim_battery
         data:
           value: 87
+      # Re-render the numeric sensors so a unit change is applied even when the
+      # helper values did not change.
+      - action: homeassistant.update_entity
+        target:
+          entity_id:
+            - sensor.nepthass_dev_temperature
+            - sensor.nepthass_dev_humidity
+            - sensor.nepthass_dev_battery
 
   nepthass_dev_scenario_motion_detected:
     alias: "NeptHass Dev: motion detected"

@@ -11,6 +11,7 @@ import (
 
 	"github.com/nepthass/nepthass/internal/audit"
 	"github.com/nepthass/nepthass/internal/auth"
+	"github.com/nepthass/nepthass/internal/discord/ui"
 	"github.com/nepthass/nepthass/internal/entities"
 )
 
@@ -75,7 +76,7 @@ func (r *Registry) allow(ctx context.Context, req Request) Reply {
 	if err := r.deps.Entities.Allow(ctx, req.Actor, id, access); err != nil {
 		return r.fail(req, err)
 	}
-	return Reply{Content: fmt.Sprintf("%s `%s` now has **%s** access.", iconOK, id, access)}
+	return Reply{Content: fmt.Sprintf("%s `%s` now has **%s** access.", ui.IconOK, id, access)}
 }
 
 func (r *Registry) revoke(ctx context.Context, req Request) Reply {
@@ -90,7 +91,7 @@ func (r *Registry) revoke(ctx context.Context, req Request) Reply {
 	if !removed {
 		return Reply{Content: fmt.Sprintf("`%s` was not on the allowlist.", id)}
 	}
-	return Reply{Content: fmt.Sprintf("%s `%s` was removed from the allowlist.", iconOK, id)}
+	return Reply{Content: fmt.Sprintf("%s `%s` was removed from the allowlist.", ui.IconOK, id)}
 }
 
 func (r *Registry) listPermissions(ctx context.Context, req Request) Reply {
@@ -104,13 +105,13 @@ func (r *Registry) listPermissions(ctx context.Context, req Request) Reply {
 	var b strings.Builder
 	for i, p := range perms {
 		line := fmt.Sprintf("\u2022 `%s` - **%s**\n", p.ID, p.Access)
-		if b.Len()+len(line) > maxDescription-60 {
+		if b.Len()+len(line) > ui.MaxDescription-60 {
 			fmt.Fprintf(&b, "... and %d more", len(perms)-i)
 			break
 		}
 		b.WriteString(line)
 	}
-	return Reply{Embeds: []*discordgo.MessageEmbed{newEmbed("Permissions", b.String(), colorOK)}}
+	return Reply{Embeds: []*discordgo.MessageEmbed{ui.Embed("Permissions", b.String(), ui.ColorOK)}}
 }
 
 func (r *Registry) completePermissions(ctx context.Context, req Request) []*discordgo.ApplicationCommandOptionChoice {
@@ -129,8 +130,8 @@ func (r *Registry) completePermissions(ctx context.Context, req Request) []*disc
 	}
 	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(states))
 	for _, st := range states {
-		if len(st.ID) <= maxChoice {
-			choices = append(choices, choice(st.FriendlyName()+" ("+string(st.ID)+")", string(st.ID)))
+		if len(st.ID) <= ui.MaxChoice {
+			choices = append(choices, ui.Choice(st.FriendlyName()+" ("+string(st.ID)+")", string(st.ID)))
 		}
 	}
 	return choices
@@ -168,25 +169,25 @@ func (r *Registry) audit(ctx context.Context, req Request) Reply {
 		b.WriteString(auditLine(e))
 		b.WriteByte('\n')
 	}
-	return Reply{Embeds: []*discordgo.MessageEmbed{newEmbed("Audit Log", b.String(), colorOK)}}
+	return Reply{Embeds: []*discordgo.MessageEmbed{ui.Embed("Audit Log", b.String(), ui.ColorOK)}}
 }
 
 func auditLine(e audit.Entry) string {
-	icon := iconOK
+	icon := ui.IconOK
 	switch e.Outcome {
 	case audit.OutcomeDenied:
-		icon = iconDenied
+		icon = ui.IconDenied
 	case audit.OutcomeError:
-		icon = iconWarn
+		icon = ui.IconWarn
 	case audit.OutcomeSuccess:
 		// default icon
 	}
-	line := fmt.Sprintf("%s %s <@%s> `%s` %s", icon, relative(e.Time), e.ActorID, e.Command, escape(e.Action))
+	line := fmt.Sprintf("%s %s <@%s> `%s` %s", icon, ui.Relative(e.Time), e.ActorID, e.Command, ui.Escape(e.Action))
 	if e.EntityID != "" {
 		line += " `" + e.EntityID + "`"
 	}
 	if e.Detail != "" {
-		line += " - " + escape(truncate(e.Detail, maxDetailShown))
+		line += " - " + ui.Escape(ui.Truncate(e.Detail, maxDetailShown))
 	}
 	return line
 }

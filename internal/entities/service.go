@@ -43,6 +43,7 @@ type Recorder interface {
 type Deps struct {
 	HA          HomeAssistant
 	Permissions *Permissions
+	Aliases     *Aliases
 	Audit       Recorder
 	Logger      *slog.Logger
 	Now         func() time.Time
@@ -68,12 +69,20 @@ func (s *Service) Status(ctx context.Context, actor auth.Actor, id ID) (State, e
 	if !access.AtLeast(AccessRead) {
 		return State{}, ErrAccessDenied
 	}
-	return s.d.HA.State(ctx, id)
+	st, err := s.d.HA.State(ctx, id)
+	if err != nil {
+		return State{}, err
+	}
+	if st.Alias, err = s.d.Aliases.Get(ctx, id); err != nil {
+		return State{}, err
+	}
+	return st, nil
 }
 
 // Device is a permitted entity with its live state (nil when Home Assistant no longer knows it).
 type Device struct {
 	ID     ID
+	Alias  string
 	Access Access
 	State  *State
 }
@@ -113,9 +122,14 @@ func (s *Service) Devices(ctx context.Context, actor auth.Actor, page int) (Devi
 	for _, st := range states {
 		byID[st.ID] = st
 	}
+	aliases, err := s.d.Aliases.All(ctx)
+	if err != nil {
+		return DevicePage{}, err
+	}
 	for _, p := range slice {
-		d := Device{ID: p.ID, Access: p.Access}
+		d := Device{ID: p.ID, Access: p.Access, Alias: aliases[p.ID]}
 		if st, ok := byID[p.ID]; ok {
+			st.Alias = d.Alias
 			d.State = &st
 		}
 		result.Devices = append(result.Devices, d)
@@ -123,9 +137,16 @@ func (s *Service) Devices(ctx context.Context, actor auth.Actor, page int) (Devi
 	return result, nil
 }
 
-// Suggest returns permitted entity IDs holding at least the given access whose
-// ID contains query (case-insensitive), for Discord autocomplete.
-func (s *Service) Suggest(ctx context.Context, actor auth.Actor, minimum Access, query string) ([]ID, error) {
+// Suggestion is an autocomplete candidate: the canonical ID and its alias.
+type Suggestion struct {
+	ID    ID
+	Alias string
+}
+
+// Suggest returns permitted entities holding at least the given access whose ID
+// or alias contains query (case-insensitive), for Discord autocomplete. The
+// submitted value is always the canonical ID.
+func (s *Service) Suggest(ctx context.Context, actor auth.Actor, minimum Access, query string) ([]Suggestion, error) {
 	if err := actor.Require(auth.LevelUser); err != nil {
 		return nil, err
 	}
@@ -133,15 +154,23 @@ func (s *Service) Suggest(ctx context.Context, actor auth.Actor, minimum Access,
 	if err != nil {
 		return nil, err
 	}
+	aliases, err := s.d.Aliases.All(ctx)
+	if err != nil {
+		return nil, err
+	}
 	query = strings.ToLower(strings.TrimSpace(query))
-	var ids []ID
+	var out []Suggestion
 	for _, p := range perms {
-		if p.Access.AtLeast(minimum) && strings.Contains(string(p.ID), query) {
-			ids = append(ids, p.ID)
-			if len(ids) == MaxSuggestions {
+		alias := aliases[p.ID]
+		if !p.Access.AtLeast(minimum) {
+			continue
+		}
+		if strings.Contains(string(p.ID), query) || strings.Contains(strings.ToLower(alias), query) {
+			out = append(out, Suggestion{ID: p.ID, Alias: alias})
+			if len(out) == MaxSuggestions {
 				break
 			}
 		}
 	}
-	return ids, nil
+	return out, nil
 }

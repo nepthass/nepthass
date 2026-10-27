@@ -4,12 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 	"testing/fstest"
 	"time"
+
+	"github.com/nepthass/nepthass/migrations"
 )
 
 func openTemp(t *testing.T) (*sql.DB, string) {
@@ -76,8 +79,12 @@ func TestOpen_isIdempotent_whenReopenedWithSameMigrations(t *testing.T) {
 	if err := db.QueryRow("SELECT count(*) FROM schema_migrations").Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if n != 1 {
-		t.Errorf("schema_migrations rows = %d, want 1", n)
+	embedded, err := fs.Glob(migrations.FS, "*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != len(embedded) {
+		t.Errorf("schema_migrations rows = %d, want one per migration (%d)", n, len(embedded))
 	}
 }
 
@@ -182,5 +189,73 @@ func TestFormatTime_sortsChronologically(t *testing.T) {
 	}
 	if FormatTime(earlier) >= FormatTime(later) {
 		t.Error("formatted timestamps do not sort chronologically")
+	}
+}
+
+func TestMigrate_upgradesAV010Database_withoutLosingGrantsOrAuditRecords(t *testing.T) {
+	db := memDB(t)
+	ctx := context.Background()
+	v010, err := migrations.FS.ReadFile("0001_foundation.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(ctx, db, fstest.MapFS{"0001_foundation.sql": {Data: v010}}); err != nil {
+		t.Fatalf("install v0.1.0 schema: %v", err)
+	}
+	for _, q := range []string{
+		"INSERT INTO entity_permissions (entity_id, access, granted_by, updated_at) VALUES ('light.kitchen', 'control', 'admin', '2026-10-27T10:00:00.000Z')",
+		"INSERT INTO entity_permissions (entity_id, access, granted_by, updated_at) VALUES ('sensor.hall', 'read', 'admin', '2026-10-27T10:00:00.000Z')",
+		"INSERT INTO command_audit_logs (occurred_at, actor_id, command, entity_id, action, outcome, detail) VALUES ('2026-10-27T10:00:01.000Z', '1', 'control', 'light.kitchen', 'on', 'success', '')",
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := Migrate(ctx, db, migrations.FS); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	if err := Migrate(ctx, db, migrations.FS); err != nil {
+		t.Fatalf("second upgrade run must be a no-op: %v", err)
+	}
+
+	count := func(q string) (n int) {
+		if err := db.QueryRow(q).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if got := count("SELECT count(*) FROM entity_permissions WHERE (entity_id, access) IN (('light.kitchen','control'), ('sensor.hall','read'))"); got != 2 {
+		t.Errorf("surviving grants = %d, want 2", got)
+	}
+	if got := count("SELECT count(*) FROM command_audit_logs WHERE command = 'control' AND entity_id = 'light.kitchen'"); got != 1 {
+		t.Errorf("surviving audit rows = %d, want 1", got)
+	}
+	if got := count("SELECT count(*) FROM sqlite_master WHERE name IN ('entity_aliases','setup_sessions','known_entities','idx_setup_sessions_one_active')"); got != 4 {
+		t.Errorf("new schema objects = %d, want 4", got)
+	}
+	if got := count("SELECT count(*) FROM schema_migrations"); got != 2 {
+		t.Errorf("schema_migrations rows = %d, want 2", got)
+	}
+}
+
+func TestSetupSessionsIndex_allowsOnlyOneActiveSessionPerGuildAndAdmin(t *testing.T) {
+	db, _ := openTemp(t)
+	insert := func(id, guild, admin, status string) error {
+		_, err := db.Exec("INSERT INTO setup_sessions (id, guild_id, admin_id, step, status, version, state, created_at, updated_at, expires_at) VALUES (?, ?, ?, 'health', ?, 1, '{}', 'x', 'x', 'x')", id, guild, admin, status)
+		return err
+	}
+
+	first := insert("a", "g1", "u1", "active")
+	duplicate := insert("b", "g1", "u1", "active")
+	otherAdmin := insert("c", "g1", "u2", "active")
+	otherGuild := insert("d", "g2", "u1", "active")
+	finished := insert("e", "g1", "u1", "completed")
+
+	if first != nil || otherAdmin != nil || otherGuild != nil || finished != nil {
+		t.Errorf("legitimate inserts failed: %v %v %v %v", first, otherAdmin, otherGuild, finished)
+	}
+	if duplicate == nil {
+		t.Error("a second active session for the same guild and administrator was accepted")
 	}
 }
