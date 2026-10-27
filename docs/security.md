@@ -44,7 +44,7 @@ NeptHass sits between a chat platform and your home, so it is deny-by-default an
 
 - Alias uniqueness is case-insensitive but not confusable-aware: visually similar characters from different scripts count as different aliases.
 - Discord shows entity names and states to Discord; the wizard's ephemeral messages are private to the administrator but not end-to-end encrypted.
-- The wizard has been verified with simulated interactions and a real Home Assistant, but not against a live Discord connection yet.
+- Automated tests drive the wizard with simulated Discord interactions and a real Home Assistant. The maintainer also reported passing manual checks on a live Discord server (user-reported, recorded in [development/smoke-tests.md](development/smoke-tests.md)); the automated suite itself never talks to Discord.
 
 ## Reporting a vulnerability
 
