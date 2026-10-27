@@ -46,8 +46,15 @@ What they verify, against the real Home Assistant:
 | Stale confirmation (v0.2.0) | a permission revoked while a review is pending is not restored by the old confirmation, which is dead afterwards |
 | Sessions (v0.2.0) | a setup session survives closing and reopening the database |
 | Sync (v0.2.0) | first sync records a baseline; a newly reported entity is listed as new; shared-but-missing and shared-but-unavailable entities are reported; nothing is shared automatically |
+| Monitoring sync (v0.3.0) | NeptHass authenticates to the real WebSocket, subscribes, synchronizes, and classifies the seven virtual sensors (category, raw state, unit, meaning); the light is not tracked; every health layer is true |
+| Monitoring events (v0.3.0) | every scenario script (motion, door, window, high temperature, water leak, low battery) is received as a real `state_changed` event and tracked with the right meaning and a newer revision; reset returns to baseline in metric units |
+| Monitoring unavailable (v0.3.0) | the offline scenario makes every sensor `unavailable`, interpreted as not reporting and never as safe; recovery restores the real values |
+| Monitoring outage (v0.3.0) | through a TCP proxy in front of the real Home Assistant, cutting the network marks monitoring not healthy and keeps last values readable; restoring it reconnects and reconciles a change that happened while disconnected, with no event |
+| Monitoring credentials (v0.3.0) | a wrong token is reported as an authentication failure, not a network failure |
+| Monitoring authorization (v0.3.0) | with real events flowing, a shared sensor is readable, an unshared leak sensor is denied, the listing contains only shared sensors, a stranger is refused, and revocation applies on the next read |
+| Monitoring shutdown (v0.3.0) | cancelling while healthy stops the monitor cleanly |
 
-Not covered: anything that involves Discord, and Home Assistant being stopped (see manual checks M30, M31 and S02).
+Not covered: anything that involves Discord, and Home Assistant being stopped (see manual checks M30, M31, S02 and L12). A real container restart is also not part of this suite (it needs container control); it was observed once with a temporary probe, see section 4.
 
 The ordinary unit tests (`go test -race ./...`) additionally cover the Discord interaction logic with fakes: guild, user and administrator authorization for commands, components and autocomplete, rate limiting and the command replies. They do not prove the real Discord transport, which is what the manual checks are for.
 
@@ -141,7 +148,7 @@ Use the dev stack with the `app` profile rebuilt from the v0.2.0 code (`up -d --
 
 | # | Step | Expected |
 | --- | --- | --- |
-| S01 | admin: `/setup` | an ephemeral panel "Step 1 of 6: Connection health": gateway connected, Home Assistant connected with its version, SQLite responding, WebSocket "not available in this release", NeptHass version; **Next** enabled |
+| S01 | admin: `/setup` | an ephemeral panel "Step 1 of 6: Connection health": gateway connected, Home Assistant connected with its version, SQLite responding, a WebSocket monitoring line (in v0.2.0 it read "not available in this release"; from v0.3.0 it shows the live monitoring state), NeptHass version; **Next** enabled |
 | S02 | `stop homeassistant`, press **Retry checks**; then `start homeassistant`, wait until healthy, **Retry checks** | while stopped: Home Assistant shown as unreachable, **Next** disabled, an explanation that setup never uses stale data; after starting: all green, **Next** enabled |
 | S03 | **Next** | "Step 2 of 6: Discover devices" with a real entity count (at least 33 on the dev instance), ten entities per page showing name, `entity_id`, state with unit, device class and "no access" |
 | S04 | **Search...**, type `water leak`, submit; then **Clear search** | one match (NeptHass Dev Water Leak); clearing returns the full list |
@@ -167,6 +174,31 @@ Use the dev stack with the `app` profile rebuilt from the v0.2.0 code (`up -d --
 | S24 | upgrade: stop the v0.1.0 dev stack's NeptHass, start v0.2.0 on the same `nepthass-data` volume (back it up first) | NeptHass starts; `/permissions list` and `/audit` still show the old entries; the log shows no migration error |
 | S25 | (optional) leave a session idle for 24 hours, press a button | "Setup expired"; nothing applied |
 
+### H. v0.3.0 live monitoring
+
+Use the dev stack with the `app` profile rebuilt from the v0.3.0 code (`up -d --build`), the simulation at baseline, and the seven virtual sensors shared (run `/setup` or `/permissions allow`; keep the light and switch shared too so the existing commands can be re-checked). The NeptHass log should show `home assistant websocket authenticated`, `home assistant event subscription active` and `home assistant initial synchronization completed`. Monitoring never sends a message by itself: you only see its effects through `/health` and `/sensors`. Rows marked (optional) need container or network control.
+
+| # | Step | Expected |
+| --- | --- | --- |
+| L01 | `/health` shortly after start | the line "Home Assistant WebSocket (live monitoring)" reads "Healthy: N sensors tracked" (N is at least 7), synchronized and last-event times, and Transport, Authenticated, Subscribed, Snapshot all ticked |
+| L02 | `/sensors` at baseline | the seven sensors listed with temperature `21.5 °C`, humidity `45 %`, battery `87 %`, motion *clear (off)*, door *closed (off)*, window *closed (off)*, water leak *dry (off)*; no stale banner; neither the light nor the switch is listed |
+| L03 | run `NeptHass Dev: motion detected`, then `/sensors` | motion *motion detected (on)* with a recent "changed" time; **no message is sent to Discord** (notifications are v0.4.0) |
+| L04 | run the door, window, high temperature, water leak and low battery scenarios one at a time, `/sensors` after each | door and window *open (on)*, temperature `31.2 °C`, water leak *water detected (on)*, battery `12 %` |
+| L05 | run `NeptHass Dev: reset to baseline`, `/sensors` | everything back to the baseline values |
+| L06 | run `NeptHass Dev: all sensors offline`, `/sensors`; then reset | every row shows *unavailable (not reporting)* with a warning icon; no row says closed, clear or dry; after the reset the real values return |
+| L07 | after opening the door, compare `/sensors` with `/status entity:binary_sensor.nepthass_dev_door` | both agree (open) |
+| L08 | the stranger runs `/sensors` | "You are not authorized to use NeptHass." and nothing else |
+| L09 | share only the temperature and door sensors, trigger the water leak and motion scenarios, run `/sensors` as the user | only temperature and door appear; the leak and motion sensors are not shown or hinted at |
+| L10 | with the door shown in `/sensors`, run `/permissions revoke` for it, then `/sensors` again (no restart) | the door is gone from the very next call |
+| L11 | give the door an alias in `/setup`, run `/sensors` | the alias is shown instead of the Home Assistant name |
+| L12 | restart Home Assistant only (`docker compose --env-file .env.dev -f compose.dev.yaml restart homeassistant`); run `/health` and `/sensors` while it is down, and again once it is healthy | while down: the monitoring line shows a warning ("Cannot reach Home Assistant's WebSocket; retrying, next attempt ...", last known values may be outdated), the four layers are crossed, `/sensors` shows the amber banner and warning icons; afterwards: Healthy again, the Reconnects counter is at least 1, the banner is gone, values current. `/devices`, `/status` and `/control` keep working (when Home Assistant is up) |
+| L13 | (optional) invalid token: delete the long-lived token in the Home Assistant profile, then restart Home Assistant | `/health` shows "Home Assistant rejected the access token for the WebSocket (check HA_TOKEN)" and retries slowly (30 s growing to 10 min); after creating a new token, updating `.env.dev` and `up -d`, it is Healthy again |
+| L14 | (optional) network drop: with Home Assistant running, `docker network disconnect nepthass-dev_dev nepthass-dev-nepthass-1`, run `NeptHass Dev: door opened` from the Home Assistant UI, then `docker network connect nepthass-dev_dev nepthass-dev-nepthass-1`. This also cuts NeptHass's Discord connection until you reconnect | after reconnecting and a few seconds, `/sensors` shows the door open although NeptHass never saw the event (reconciliation) |
+| L15 | `docker compose --env-file .env.dev -f compose.dev.yaml --profile app stop nepthass`, then read its log | it stops within a few seconds with exit code 0 and logs `home assistant monitoring stopped`; starting it again works |
+| L16 | `restart nepthass`, run `/sensors` immediately and again after about ten seconds | right after start: not connected or stale; ten seconds later: healthy with current values; permissions and aliases are unchanged |
+| L17 | existing commands: `/ping`, `/devices`, `/status`, `/control` (light on and off), `/permissions`, `/audit`, and `/setup` step 1 | all behave as in v0.2.0; the wizard's health step shows the monitoring line instead of "not available in this release" |
+| L18 | `docker compose --env-file .env.dev -f compose.dev.yaml logs nepthass` after all of the above | no token, no sensor values and no raw Home Assistant payloads anywhere in the log |
+
 ### Reporting and recording results
 
 Copy the table below into your notes or pull request and fill it in. **Leave a row as "Not executed" unless you ran it.** Never mark a row passed from the unit tests or the automated integration tests.
@@ -185,13 +217,14 @@ Version/commit tested: `________`   Tester: `________`   Date: `________`
 | E. Revoking, restarting, auditing | M60-M68 | Not executed | | |
 | F. Resilience | M30-M32 | Not executed | | |
 | G. v0.2.0 setup wizard and /sync | S01-S25 | Partly: see section 4 (user-reported) | User-reported pass for S01, S03, S08, S09, S10, S13, S14, S15, S18, S22 | The other group G rows were not reported |
+| H. v0.3.0 live monitoring | L01-L18 | Not executed | | Manual acceptance of v0.3.0 is pending |
 
 ## Known gaps
 
 - There are no automated Discord checks; real Discord connectivity can only be verified by hand with real credentials.
 - Home Assistant outages (M30, M31) are manual because they need container control.
 - The integration tests poll the real Home Assistant with a bounded timeout after each action, because REST offers no push notification and template entities update a moment after a service call.
-- `/health`'s WebSocket line is intentionally "not available" until v0.3.0.
+- Monitoring recovery from a real Home Assistant container restart needs container control, so it is a manual check (L12). The automated suite covers outages with a TCP proxy; a real restart was observed once with a temporary probe (section 4).
 - The automated tests render the wizard (embeds, buttons, select menus, modals) with simulated interactions and check it against Discord's documented limits; they never talk to Discord. Live Discord behavior is covered only by manual group G, whose recorded results (section 4) are user-reported.
 - Session expiry after 24 hours is covered by automated tests with an injected clock; S25 is optional because it takes a day.
 

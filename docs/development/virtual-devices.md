@@ -113,9 +113,27 @@ Invoke-RestMethod -Headers $h -Uri "$base/api/states/binary_sensor.nepthass_dev_
 
 Every virtual entity appears in the wizard's discovery list, so the whole flow (discover, share, alias, review, apply, `/sync`) can be exercised without hardware. Only the light and the switch can be given `control`. The offline scenario makes entities report `unavailable`, which the wizard shows as "not reporting" and `/sync` lists for shared entities.
 
+## Using them with live monitoring (v0.3.0)
+
+NeptHass's monitor receives every state change of these entities over the WebSocket within moments. After sharing the sensors (`/setup` or `/permissions allow`), `/sensors` shows what monitoring currently believes:
+
+| Do this in Home Assistant | `/sensors` shows |
+| --- | --- |
+| baseline | temperature `21.5 °C`, humidity `45 %`, battery `87 %`, motion *clear (off)*, door *closed (off)*, window *closed (off)*, water leak *dry (off)* |
+| run `scenario_motion_detected` | motion *motion detected (on)* |
+| run `scenario_door_opened` / `scenario_window_opened` | door / window *open (on)* |
+| run `scenario_high_temperature` | temperature `31.2 °C` |
+| run `scenario_water_leak` | water leak *water detected (on)* |
+| run `scenario_low_battery` | battery `12 %` |
+| run `scenario_sensors_offline` | every sensor *unavailable (not reporting)* with a warning icon, never closed, clear or dry |
+| run `scenario_reset` | back to the baseline |
+| restart Home Assistant (`docker compose --env-file .env.dev -f compose.dev.yaml restart homeassistant`) | `/health` shows reconnecting, `/sensors` is marked stale, then both recover after Home Assistant is back (about 30 to 90 seconds) |
+
+The automated integration tests use exactly these scripts (`tests/integration/monitor_test.go`). Monitoring only observes: nothing is sent to Discord when these change; notifications arrive in v0.4.0.
+
 ## Triggers for the upcoming milestones
 
-These are the situations the v0.3.0 (real-time monitoring) and v0.4.0 (notifications) work will need. Nothing in NeptHass v0.1.0 listens for these events yet: today you can only observe them with `/status` and `/devices`.
+These are the situations the monitoring milestones react to. v0.3.0 (real-time monitoring) observes all of them live; v0.4.0 (notifications) will turn some of them into messages and does not exist yet.
 
 | To trigger | Do this | Entity transition |
 | --- | --- | --- |
