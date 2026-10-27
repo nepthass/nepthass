@@ -1,0 +1,92 @@
+# Helpers that back the virtual devices and drive the simulation.
+#
+# Every helper has an "initial" value, so each Home Assistant restart returns
+# the whole simulation to its predictable baseline.
+
+input_boolean:
+  # Backing state of the controllable virtual devices.
+  nepthass_dev_light_backing:
+    name: NeptHass Dev light (backing state)
+    icon: mdi:lightbulb
+    initial: false
+  nepthass_dev_switch_backing:
+    name: NeptHass Dev switch (backing state)
+    icon: mdi:toggle-switch
+    initial: false
+
+  # Simulated physical conditions. "on" means the condition is active.
+  nepthass_dev_sim_motion:
+    name: Simulate motion detected
+    icon: mdi:motion-sensor
+    initial: false
+  nepthass_dev_sim_door_open:
+    name: Simulate door open
+    icon: mdi:door-open
+    initial: false
+  nepthass_dev_sim_window_open:
+    name: Simulate window open
+    icon: mdi:window-open
+    initial: false
+  nepthass_dev_sim_leak:
+    name: Simulate water leak
+    icon: mdi:water-alert
+    initial: false
+
+  # Simulated connectivity loss. "on" makes the matching sensor "unavailable".
+  nepthass_dev_offline_motion:
+    name: Motion sensor offline
+    icon: mdi:wifi-off
+    initial: false
+  nepthass_dev_offline_door:
+    name: Door sensor offline
+    icon: mdi:wifi-off
+    initial: false
+  nepthass_dev_offline_window:
+    name: Window sensor offline
+    icon: mdi:wifi-off
+    initial: false
+  nepthass_dev_offline_temperature:
+    name: Temperature sensor offline
+    icon: mdi:wifi-off
+    initial: false
+  nepthass_dev_offline_humidity:
+    name: Humidity sensor offline
+    icon: mdi:wifi-off
+    initial: false
+  nepthass_dev_offline_leak:
+    name: Water leak sensor offline
+    icon: mdi:wifi-off
+    initial: false
+  nepthass_dev_offline_battery:
+    name: Battery sensor offline
+    icon: mdi:wifi-off
+    initial: false
+
+input_number:
+  nepthass_dev_sim_temperature:
+    name: Simulated temperature
+    icon: mdi:thermometer
+    min: -40
+    max: 80
+    step: 0.1
+    initial: 21.5
+    mode: box
+    unit_of_measurement: "\u00b0C"
+  nepthass_dev_sim_humidity:
+    name: Simulated humidity
+    icon: mdi:water-percent
+    min: 0
+    max: 100
+    step: 1
+    initial: 45
+    mode: box
+    unit_of_measurement: "%"
+  nepthass_dev_sim_battery:
+    name: Simulated battery level
+    icon: mdi:battery
+    min: 0
+    max: 100
+    step: 1
+    initial: 87
+    mode: box
+    unit_of_measurement: "%"

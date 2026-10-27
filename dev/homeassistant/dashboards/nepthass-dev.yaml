@@ -1,0 +1,54 @@
+# "NeptHass Dev" dashboard: everything needed to drive the simulation from the
+# Home Assistant UI. Mounted read-only; edit this file and reload the browser.
+title: NeptHass Dev
+views:
+  - title: Simulator
+    path: simulator
+    icon: mdi:flask-outline
+    cards:
+      - type: entities
+        title: Controllable by NeptHass (light and switch only)
+        entities:
+          - light.nepthass_dev_light
+          - switch.nepthass_dev_switch
+      - type: entities
+        title: Sensors (read-only for NeptHass)
+        entities:
+          - binary_sensor.nepthass_dev_motion
+          - binary_sensor.nepthass_dev_door
+          - binary_sensor.nepthass_dev_window
+          - binary_sensor.nepthass_dev_water_leak
+          - sensor.nepthass_dev_temperature
+          - sensor.nepthass_dev_humidity
+          - sensor.nepthass_dev_battery
+      - type: entities
+        title: Scenarios (click Run)
+        entities:
+          - script.nepthass_dev_scenario_reset
+          - script.nepthass_dev_scenario_motion_detected
+          - script.nepthass_dev_scenario_door_opened
+          - script.nepthass_dev_scenario_window_opened
+          - script.nepthass_dev_scenario_high_temperature
+          - script.nepthass_dev_scenario_water_leak
+          - script.nepthass_dev_scenario_low_battery
+          - script.nepthass_dev_scenario_sensors_offline
+      - type: entities
+        title: Simulation inputs
+        entities:
+          - input_boolean.nepthass_dev_sim_motion
+          - input_boolean.nepthass_dev_sim_door_open
+          - input_boolean.nepthass_dev_sim_window_open
+          - input_boolean.nepthass_dev_sim_leak
+          - input_number.nepthass_dev_sim_temperature
+          - input_number.nepthass_dev_sim_humidity
+          - input_number.nepthass_dev_sim_battery
+      - type: entities
+        title: Simulate connection loss (sensor becomes unavailable)
+        entities:
+          - input_boolean.nepthass_dev_offline_motion
+          - input_boolean.nepthass_dev_offline_door
+          - input_boolean.nepthass_dev_offline_window
+          - input_boolean.nepthass_dev_offline_temperature
+          - input_boolean.nepthass_dev_offline_humidity
+          - input_boolean.nepthass_dev_offline_leak
+          - input_boolean.nepthass_dev_offline_battery

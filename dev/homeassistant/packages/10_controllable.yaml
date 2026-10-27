@@ -1,0 +1,35 @@
+# Virtual light and switch: the only entities NeptHass may control.
+#
+# They are real Home Assistant template entities. Turning them on or off runs
+# real Home Assistant services (light.turn_on, switch.turn_off, ...) that flip
+# a backing helper, and the entity state is derived from that helper, exactly
+# like a device that reports its state back.
+
+template:
+  - light:
+      - name: NeptHass Dev Light
+        unique_id: nepthass_dev_light
+        default_entity_id: light.nepthass_dev_light
+        state: "{{ is_state('input_boolean.nepthass_dev_light_backing', 'on') }}"
+        turn_on:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.nepthass_dev_light_backing
+        turn_off:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.nepthass_dev_light_backing
+
+  - switch:
+      - name: NeptHass Dev Switch
+        unique_id: nepthass_dev_switch
+        default_entity_id: switch.nepthass_dev_switch
+        state: "{{ is_state('input_boolean.nepthass_dev_switch_backing', 'on') }}"
+        turn_on:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.nepthass_dev_switch_backing
+        turn_off:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.nepthass_dev_switch_backing
