@@ -1,6 +1,6 @@
 # v0.3.0 design: Sensor Monitoring
 
-Status: in implementation on `feature/v0.3.0` (not released). This document records the decisions the implementation follows; [../architecture.md](../architecture.md) describes the resulting system once it ships.
+Status: implemented on `feature/v0.3.0` (unreleased, awaiting manual acceptance). This document records the decisions the implementation follows; [../architecture.md](../architecture.md) describes the resulting system.
 
 ## Goals
 
@@ -250,21 +250,21 @@ Structured logs through the existing scrubbing logger: connection established, a
 
 | Scenario | Expected behavior | Recovery | Visible health | Test |
 | --- | --- | --- | --- | --- |
-| Home Assistant down at startup | Bot and REST commands run; monitor retries | backoff until reachable, then sync | Reconnecting (network), values stale | `TestFailure_unavailableAtStartup` |
-| Home Assistant unavailable during monitoring | read error or timeout ends the session | reconnect, snapshot, replay | Reconnecting, cache marked stale | `TestFailure_dropDuringMonitoring` |
-| Home Assistant restarts | server close then refused connections | backoff until up; authoritative snapshot replaces cache | Reconnecting then Healthy | `TestFailure_homeAssistantRestart` (+ real HA) |
-| Network connection drops | same as above | same | Reconnecting (network) | `TestFailure_dropDuringMonitoring`, proxy test against real HA |
-| Invalid token | `auth_invalid`, no hot loop | slow retry (30 s up to 10 min) | Failed (authentication), "update HA_TOKEN" | `TestFailure_invalidToken` |
-| Invalid JSON | protocol failure, session closed | backoff, reconnect | Reconnecting (protocol) | `TestFailure_malformedJSON` |
-| Oversized message | read limit ends the session | backoff, reconnect | Reconnecting (protocol) | `TestFailure_oversizedMessage` |
-| Unexpected entity ID | event dropped and counted | none needed | Healthy (invalid counter grows) | `TestFailure_unexpectedEntityID` |
-| Slow event consumer | O(1) handler; if the peer disconnects us, reconnect | resync | Reconnecting then Healthy | `TestFailure_slowConsumer` |
-| Permission revoked during monitoring | cache keeps ingesting; the next read is denied | immediate, no restart | `/sensors` omits the entity | `TestReader_revocationAppliesImmediately` |
-| Shutdown while reconnecting | backoff wait aborts | `Run` returns, nothing leaks | n/a | `TestFailure_shutdownWhileReconnecting` |
-| Shutdown while synchronizing | session closed, pending calls fail | `Run` returns, socket closed | n/a | `TestFailure_shutdownWhileSynchronizing` |
-| Subscription rejected | protocol failure | backoff | Reconnecting (protocol) | `TestFailure_subscriptionRejected` |
-| Events during snapshot | buffered, then replayed through ordering | none needed | Healthy | `TestReconcile_eventsDuringSnapshot` |
-| Rapid reconnect cycles | backoff keeps growing until a stable session | n/a | Reconnecting | `TestFailure_rapidReconnectCycles` |
+| Home Assistant down at startup | Bot and REST commands run; monitor retries | backoff until reachable, then sync | Reconnecting (network), values stale | `TestFailure_unavailableAtStartup_retriesUntilItIsUp` |
+| Home Assistant unavailable during monitoring | read error or timeout ends the session | reconnect, snapshot, replay | Reconnecting, cache marked stale | `TestFailure_dropDuringMonitoring_marksValuesStaleThenReconcilesWhatChangedMeanwhile` |
+| Home Assistant restarts | server close then refused connections | backoff until up; authoritative snapshot replaces cache | Reconnecting then Healthy | `TestFailure_homeAssistantRestart_neverDuplicatesTheSubscription`; real Home Assistant: `TestMonitor_reconnectsAfterANetworkOutage_andReconcilesChangesItNeverSaw`; a real container restart was also observed once with a temporary probe that is not part of the suite (see [smoke-tests.md](../development/smoke-tests.md), L12) |
+| Network connection drops | same as above | same | Reconnecting (network) | `TestFailure_dropDuringMonitoring_marksValuesStaleThenReconcilesWhatChangedMeanwhile`; real Home Assistant behind a TCP proxy: `TestMonitor_reconnectsAfterANetworkOutage_andReconcilesChangesItNeverSaw` |
+| Invalid token | `auth_invalid`, no hot loop | slow retry (30 s up to 10 min) | Failed (authentication), "update HA_TOKEN" | `TestFailure_invalidToken_usesTheSlowScheduleAndNeverBusyLoops` |
+| Invalid JSON | protocol failure, session closed | backoff, reconnect | Reconnecting (protocol) | `TestFailure_malformedJSON_dropsTheConnectionAndRecovers` |
+| Oversized message | read limit ends the session | backoff, reconnect | Reconnecting (protocol) | `TestFailure_oversizedMessage_failsTheSyncAndRecoversWhenItShrinks` |
+| Unexpected entity ID | event dropped and counted | none needed | Healthy (invalid counter grows) | `TestFailure_unexpectedEntityID_isCountedAndDropped` |
+| Slow event consumer | O(1) handler; if the peer disconnects us, reconnect | resync | Reconnecting then Healthy | `TestFailure_slowConsumer_boundedProcessing_thenAnEvictionResynchronizes` |
+| Permission revoked during monitoring | cache keeps ingesting; the next read is denied | immediate, no restart | `/sensors` omits the entity | `TestReader_revocationAppliesImmediately_evenForAlreadyCachedData` |
+| Shutdown while reconnecting | backoff wait aborts | `Run` returns, nothing leaks | n/a | `TestFailure_shutdownWhileReconnecting_returnsPromptly` |
+| Shutdown while synchronizing | session closed, pending calls fail | `Run` returns, socket closed | n/a | `TestFailure_shutdownWhileSynchronizing_closesTheSocket` |
+| Subscription rejected | protocol failure | backoff | Reconnecting (protocol) | `TestFailure_subscriptionRejected_isAProtocolFailure_andRecovers` |
+| Events during snapshot | buffered, then replayed through ordering | none needed | Healthy | `TestReconcile_eventsDuringTheSnapshotAreNeitherLostNorOverwritten` |
+| Rapid reconnect cycles | backoff keeps growing until a stable session | n/a | Reconnecting | `TestFailure_rapidReconnectCycles_growTheDelay_andNeverStackConnections` |
 
 ## Testing strategy
 

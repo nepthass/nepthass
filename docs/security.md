@@ -21,6 +21,11 @@ NeptHass sits between a chat platform and your home, so it is deny-by-default an
 | A non-administrator uses setup | Administrator level is required at the command, the bot routing and every setup service call; other users get a bare refusal that leaks nothing |
 | Alias abuse (mentions, markdown, impersonating an entity ID, probing for names) | Aliases are limited to letters, digits, spaces and `- ' . ( )`, 32 characters, unique, never entity-ID-shaped, escaped on output, and resolve only to entities the caller can already use |
 | Dangerous startup states | Invalid configuration aborts start; a rejected token aborts start; a newer or tampered database aborts start |
+| Unshared sensor data read through live monitoring | The monitor tracks every classified sensor in memory, but nothing reaches a user except through the `Reader`, which checks the caller's level and the entity's current permission at read time. An unshared entity is denied exactly like an unknown one |
+| Revoked access still shows cached data | Permissions are re-read on every call and never cached with the data; revocation applies on the next read |
+| Malicious or malformed Home Assistant data | Every field of an incoming state is validated (entity ID, lengths, timestamps); only the entity, state, timestamps and three attributes are read and kept; frames over 16 MiB (64 KiB before authentication) end the connection; a malformed frame ends the connection; memory is bounded |
+| Stale values presented as current | After a disconnect the last values stay readable but are labeled stale, and `unavailable`, `unknown` and invalid values are never shown as a safe state (closed, clear, dry) |
+| WebSocket token exposure | The token is sent once in the authentication message, never logged, never in a URL or an error, and the same redaction as the REST client applies |
 
 ## What it does not protect against
 
@@ -45,6 +50,17 @@ NeptHass sits between a chat platform and your home, so it is deny-by-default an
 - Alias uniqueness is case-insensitive but not confusable-aware: visually similar characters from different scripts count as different aliases.
 - Discord shows entity names and states to Discord; the wizard's ephemeral messages are private to the administrator but not end-to-end encrypted.
 - Automated tests drive the wizard with simulated Discord interactions and a real Home Assistant. The maintainer also reported passing manual checks on a live Discord server (user-reported, recorded in [development/smoke-tests.md](development/smoke-tests.md)); the automated suite itself never talks to Discord.
+
+## Live monitoring (v0.3.0)
+
+Two boundaries exist and must not be confused:
+
+1. **Internal ingestion.** The WebSocket peer is Home Assistant, not a Discord user. It is trusted only as far as possession of the configured token implies, and everything it sends is validated as untrusted input. Nothing in an event can trigger an action: monitoring adds no write path and no new control capability.
+2. **User-facing reads.** Everything shown to a Discord user passes the `Reader` (allowlisted user, plus current permission of at least `read`). `/health` shows aggregate status to any allowlisted user (state, layer flags, counts, last event time, failure category) and never URLs, tokens or raw errors.
+
+Privacy notes: sensor values live in process memory only and are lost on restart; unshared sensors are held in that memory too (tracking is not exposure); the sensor list a person sees through `/sensors` is Discord-visible like any other reply.
+
+Known limitations of monitoring: it observes only. It does not notify anyone, so it is not an alarm. A change that happens and reverses while NeptHass is disconnected leaves no trace. TLS uses the system trust store, as the REST client does (no custom CA or insecure option).
 
 ## Reporting a vulnerability
 
