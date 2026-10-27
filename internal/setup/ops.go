@@ -69,6 +69,16 @@ func (s *Service) Search(ctx context.Context, c Caller, id string, ver int, quer
 	return s.mutate(ctx, c, id, ver, func(w *Session) error { return w.SetQuery(query) })
 }
 
+// Filter sets the discovery domain filter and the shared-only toggle in one step.
+func (s *Service) Filter(ctx context.Context, c Caller, id string, ver int, d entities.Domain, sharedOnly bool) (Session, error) {
+	return s.mutate(ctx, c, id, ver, func(w *Session) error {
+		if err := w.SetShared(sharedOnly); err != nil {
+			return err
+		}
+		return w.SetDomain(d)
+	})
+}
+
 // FilterDomain restricts discovery to one domain ("" for all).
 func (s *Service) FilterDomain(ctx context.Context, c Caller, id string, ver int, d entities.Domain) (Session, error) {
 	return s.mutate(ctx, c, id, ver, func(w *Session) error { return w.SetDomain(d) })
