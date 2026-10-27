@@ -39,7 +39,7 @@ func pagerButtons(sess setup.Session, v setup.DraftView) []discordgo.MessageComp
 func permissionsPanel(sess setup.Session, v setup.DraftView, notice string) commands.Reply {
 	var b strings.Builder
 	b.WriteString(progress(sess.Step, "Device permissions") + "\n")
-	fmt.Fprintf(&b, "Selected: **%d** entities. New shares default to **read**. Control is available for lights and switches only.\n\n", v.Total)
+	fmt.Fprintf(&b, "Selected: **%d** %s. New shares default to **read**. Control is available for lights and switches only.\n\n", v.Total, ui.Entity(v.Total))
 	for _, it := range v.Items {
 		mark := "\u2003"
 		if v.Focus != nil && v.Focus.ID == it.ID {

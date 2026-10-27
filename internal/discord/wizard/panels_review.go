@@ -58,7 +58,7 @@ func reviewPanel(sess setup.Session, plan setup.Plan, notice string) commands.Re
 	}
 	desc := progress(sess.Step, "Review") + "\nThis is exactly what will change. Nothing has been applied yet."
 	if plan.Revoked > 0 {
-		desc += fmt.Sprintf("\n%s **%d entities will lose access.**", ui.IconWarn, plan.Revoked)
+		desc += fmt.Sprintf("\n%s **%d %s will lose access.**", ui.IconWarn, plan.Revoked, ui.Entity(plan.Revoked))
 	}
 	e := ui.Embed("Setup", desc, color)
 	addField := func(name string, lines []string) {
@@ -71,7 +71,7 @@ func reviewPanel(sess setup.Session, plan setup.Plan, notice string) commands.Re
 	addField("Access revoked", revoked)
 	addField("Alias changes", aliases)
 	addField(ui.IconWarn+" Blocking problems", problems)
-	e.Fields = append(e.Fields, ui.Field("Not changed", fmt.Sprintf("%d selected entities already match, and %d other shared entities are untouched.", plan.Unchanged, plan.UntouchedShared), false))
+	e.Fields = append(e.Fields, ui.Field("Not changed", fmt.Sprintf("Selected entities that already match: %d. Other shared entities left untouched: %d.", plan.Unchanged, plan.UntouchedShared), false))
 	if len(problems) == 0 && plan.Changes() == 0 && plan.AliasChanges == 0 {
 		e.Fields = append(e.Fields, ui.Field("Nothing to apply", "Every selected entity already matches the current configuration. Go back to change something, or cancel.", false))
 	}
@@ -139,7 +139,7 @@ func unavailablePanel(sess setup.Session) commands.Reply {
 
 // resumePanel offers to continue an interrupted session or start over.
 func resumePanel(sess setup.Session) commands.Reply {
-	text := fmt.Sprintf("You have a setup in progress: **step %d of 6**, **%d** entities selected. Nothing from it has been applied.", sess.Step.Number(), len(sess.Draft.Entries))
+	text := fmt.Sprintf("You have a setup in progress: **step %d of 6**, **%d** %s selected. Nothing from it has been applied.", sess.Step.Number(), len(sess.Draft.Entries), ui.Entity(len(sess.Draft.Entries)))
 	e := ui.Embed("Setup", text, ui.ColorOK)
 	return commands.Reply{Embeds: []*discordgo.MessageEmbed{e}, Components: []discordgo.MessageComponent{
 		row(
