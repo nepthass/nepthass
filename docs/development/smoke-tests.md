@@ -7,7 +7,7 @@ There are two separate kinds of checks. Keep them separate when you report resul
 | **Automated integration tests** | the dev Home Assistant and a token | NeptHass's real REST client, entity service, SQLite and audit log behave correctly against a real Home Assistant | a command, repeatable, no Discord |
 | **Manual Discord checks** | the dev stack **and** a real Discord test bot | the Discord transport: slash commands, ephemeral replies, autocomplete, authorization of real Discord identities | you, in Discord, by hand |
 
-The automated tests do not talk to Discord. The manual checks are the only place the Discord connection is exercised. **A manual check is "passed" only when a person actually ran it and recorded the result.** The result table at the end of this page ships with every row *Not executed*.
+The automated tests do not talk to Discord. The manual checks are the only place the Discord connection is exercised. **A manual check is "passed" only when a person actually ran it and reported the result.** The blank result template in section 3 ships with every row *Not executed*; results that were actually reported are recorded separately in section 4 and are labeled by who reported them. The automated results of a release are never recorded as manual passes.
 
 ## 1. Automated integration tests (real Home Assistant, no Discord)
 
@@ -184,7 +184,7 @@ Version/commit tested: `________`   Tester: `________`   Date: `________`
 | D. Reading and controlling | M40-M51 | Not executed | | |
 | E. Revoking, restarting, auditing | M60-M68 | Not executed | | |
 | F. Resilience | M30-M32 | Not executed | | |
-| G. v0.2.0 setup wizard and /sync | S01-S25 | Not executed | | |
+| G. v0.2.0 setup wizard and /sync | S01-S25 | Partly: see section 4 (user-reported) | User-reported pass for S01, S03, S08, S09, S10, S13, S14, S15, S18, S22 | The other group G rows were not reported |
 
 ## Known gaps
 
@@ -192,5 +192,40 @@ Version/commit tested: `________`   Tester: `________`   Date: `________`
 - Home Assistant outages (M30, M31) are manual because they need container control.
 - The integration tests poll the real Home Assistant with a bounded timeout after each action, because REST offers no push notification and template entities update a moment after a service call.
 - `/health`'s WebSocket line is intentionally "not available" until v0.3.0.
-- The wizard's Discord rendering (embeds, buttons, select menus, modals) is verified with simulated interactions and against Discord's documented limits, never against a live Discord connection: group G is the only place that does that.
+- The automated tests render the wizard (embeds, buttons, select menus, modals) with simulated interactions and check it against Discord's documented limits; they never talk to Discord. Live Discord behavior is covered only by manual group G, whose recorded results (section 4) are user-reported.
 - Session expiry after 24 hours is covered by automated tests with an injected clock; S25 is optional because it takes a day.
+
+## 4. Recorded results
+
+### v0.2.0 release (group G): user-reported manual results
+
+**Source: the project owner.** The owner reported, in the v0.2.0 release request, that the manual Discord smoke tests for the setup wizard were completed successfully on their own Discord test server and development stack. The assistant that prepared the release did **not** execute or observe these checks (it has no Discord credentials), so they are recorded as *user-reported passes* and are kept apart from the automated results below. The commit that was tested was not recorded.
+
+The report named these areas. They are mapped here only to the checks that match them, and nothing else is marked as passed.
+
+| Area the owner reported | Checks | Status |
+| --- | --- | --- |
+| Interactive `/setup` wizard | S01 | User-reported pass |
+| Entity discovery and selection | S03, S08 | User-reported pass |
+| Permission configuration | S09 | User-reported pass |
+| Alias creation and resolution | S10, and the alias part of S13 | User-reported pass |
+| Real Home Assistant device control | S13 (the `/control` part) | User-reported pass |
+| Restart persistence and setup session resume | S15 | User-reported pass |
+| Stale interaction protection | S14 | User-reported pass |
+| Stale confirmation protection | S18 | User-reported pass |
+| Non-admin authorization checks | S22 | User-reported pass |
+
+Not reported (so *not* recorded as passed): S02, S04, S05, S06, S07, S11, S12, S16, S17, S19, S20, S21, S23, S24, S25, and every check in groups A to F (v0.1.0 checks M01 to M68 stay *Not executed* in this record).
+
+### v0.2.0 release: automated results (executed by the assistant, not manual)
+
+These were produced by commands run against the release tree, never by a person in Discord:
+
+| Check | Result |
+| --- | --- |
+| `gofmt -l .`, `go vet ./...`, `go vet -tags=integration ./tests/integration/...` | clean |
+| `go test -race -shuffle=on -count=1 ./...` | all 11 packages pass |
+| Integration suite against a real Home Assistant 2026.10.4 (`go test -tags=integration`) | 21 tests, 45 PASS lines, 0 failures, 0 skips |
+| Security regression suite: 16 injected regressions of the setup, authorization, alias and escaping controls | all 16 caught by tests |
+| Migration compatibility: v0.1.0 to v0.2.0 upgrade test, and a read-only copy of a real development database | upgrade preserves grants and audit rows; the copy passes SQLite's integrity check and re-opens as a no-op |
+| `docker compose config` (production, combined example, development with all profiles) and the image build and hardened boot against the real Home Assistant | pass |
