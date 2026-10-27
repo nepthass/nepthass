@@ -29,7 +29,7 @@ func healthPanel(sess setup.Session, rep commands.HealthReport, version, notice 
 		ui.Field("Discord gateway", gateway, true),
 		ui.Field("Home Assistant REST API", check(rep.HAErr, "Connected (Home Assistant "+ui.Escape(rep.HAVersion)+")"), true),
 		ui.Field("SQLite database", check(rep.DBErr, "Responding"), true),
-		ui.Field("Home Assistant WebSocket", ui.IconDisabled+" Not available in this release", true),
+		ui.Field("Home Assistant WebSocket (live monitoring)", commands.MonitoringText(rep.Monitoring), false),
 		ui.Field("NeptHass version", ui.Escape(version), true),
 	}
 	if rep.HAErr != nil {

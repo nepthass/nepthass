@@ -86,12 +86,14 @@ type Deps struct {
 	Entities  *entities.Service
 	Discovery *entities.Discovery
 	Setup     SetupStarter
-	Audit     *audit.Log
-	HA        HomeAssistant
-	DB        Pinger
-	Gateway   func() Gateway
-	Version   string
-	Logger    *slog.Logger
+	// Monitoring may be nil when live monitoring is not wired.
+	Monitoring Monitoring
+	Audit      *audit.Log
+	HA         HomeAssistant
+	DB         Pinger
+	Gateway    func() Gateway
+	Version    string
+	Logger     *slog.Logger
 }
 
 type (
@@ -117,7 +119,7 @@ type Registry struct {
 func New(d Deps) *Registry {
 	r := &Registry{deps: d, cmds: make(map[string]command)}
 	for _, c := range []command{
-		r.cmdPing(), r.cmdHealth(), r.cmdDevices(), r.cmdStatus(), r.cmdControl(), r.cmdPermissions(), r.cmdAudit(), r.cmdSetup(), r.cmdSync(),
+		r.cmdPing(), r.cmdHealth(), r.cmdDevices(), r.cmdStatus(), r.cmdControl(), r.cmdPermissions(), r.cmdAudit(), r.cmdSetup(), r.cmdSync(), r.cmdSensors(),
 	} {
 		r.cmds[c.def.Name] = c
 		r.order = append(r.order, c.def.Name)

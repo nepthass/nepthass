@@ -36,7 +36,10 @@ type env struct {
 	log     *audit.Log
 }
 
-func newEnv(t *testing.T) env {
+func newEnv(t *testing.T) env { return newEnvWith(t, nil) }
+
+// newEnvWith builds the environment with live monitoring supplied by mon (nil: not wired).
+func newEnvWith(t *testing.T, mon func(*entities.Permissions, *entities.Aliases) commands.Monitoring) env {
 	t.Helper()
 	db, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), "cmd.db"))
 	if err != nil {
@@ -50,10 +53,14 @@ func newEnv(t *testing.T) env {
 	aliases := entities.NewAliases(db)
 	logger := slog.New(slog.DiscardHandler)
 	svc := entities.NewService(entities.Deps{HA: client, Permissions: perms, Aliases: aliases, Audit: auditLog, Logger: logger, Now: time.Now})
-	reg := commands.New(commands.Deps{
+	deps := commands.Deps{
 		Entities: svc, Audit: auditLog, HA: client, DB: db, Logger: logger, Version: "test",
 		Gateway: func() commands.Gateway { return commands.Gateway{Connected: true, Latency: 42 * time.Millisecond} },
-	})
+	}
+	if mon != nil {
+		deps.Monitoring = mon(perms, aliases)
+	}
+	reg := commands.New(deps)
 	return env{reg: reg, ha: ha, perms: perms, aliases: aliases, log: auditLog}
 }
 
@@ -247,7 +254,7 @@ func TestHealth_reportsEachSubsystem(t *testing.T) {
 
 	got := e.run(user, "health", "", nil)
 
-	mustContain(t, got, "Connected (42 ms)", "Home Assistant 2026.10.0", "Database is responding", "WebSocket", "Not available in this release")
+	mustContain(t, got, "Connected (42 ms)", "Home Assistant 2026.10.0", "Database is responding", "WebSocket", "Not running")
 }
 
 func TestHealth_reportsRejectedHomeAssistantToken(t *testing.T) {
@@ -349,7 +356,7 @@ func TestDefinitions_satisfyDiscordConstraints(t *testing.T) {
 		}
 		checkOptions("/"+d.Name, d.Options)
 	}
-	if got := strings.Join(names, ","); got != "ping,health,devices,status,control,permissions,audit,setup,sync" {
+	if got := strings.Join(names, ","); got != "ping,health,devices,status,control,permissions,audit,setup,sync,sensors" {
 		t.Errorf("commands = %s", got)
 	}
 }
