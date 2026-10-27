@@ -1,0 +1,42 @@
+# NeptHass - standalone deployment next to an existing Home Assistant install.
+#
+#   cp .env.example .env     # then fill in the bootstrap settings
+#   docker compose up -d --build
+#
+# Host networking lets NeptHass reach Home Assistant at http://127.0.0.1:8123
+# (Linux only). NeptHass opens no ports; it only makes outbound connections.
+# For bridge networking see docs/setup.md.
+name: nepthass
+
+services:
+  nepthass:
+    image: nepthass:latest
+    build:
+      context: .
+      args:
+        VERSION: ${NEPTHASS_VERSION:-dev}
+    container_name: nepthass
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - path: .env
+        required: false # a missing file is reported by NeptHass as a clear configuration error
+    volumes:
+      - nepthass-data:/data
+    # Hardening: nothing but the data volume (and a scratch /tmp) is writable.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  nepthass-data:
