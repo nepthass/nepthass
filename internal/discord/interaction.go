@@ -65,6 +65,10 @@ func (b *Bot) handleInteraction(ctx context.Context, api interactionAPI, i *disc
 		b.runCommand(ctx, api, i, actor)
 	case discordgo.InteractionApplicationCommandAutocomplete:
 		b.autocomplete(ctx, api, i, actor)
+	case discordgo.InteractionMessageComponent:
+		b.runComponent(ctx, api, i, actor)
+	case discordgo.InteractionModalSubmit:
+		b.runModalSubmit(ctx, api, i, actor)
 	default:
 		b.say(api, i, "That kind of interaction is not supported.")
 	}
@@ -99,22 +103,30 @@ func (b *Bot) runCommand(ctx context.Context, api interactionAPI, i *discordgo.I
 	}
 	runCtx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
-	reply := b.reg.Run(runCtx, newRequest(actor, i.ApplicationCommandData()))
+	reply := b.reg.Run(runCtx, newRequest(actor, i.GuildID, i.ApplicationCommandData()))
 
-	embeds := reply.Embeds
+	b.deliver(api, i, reply)
+}
+
+// deliver edits the deferred response (or the component's message) with a reply.
+func (b *Bot) deliver(api interactionAPI, i *discordgo.Interaction, reply commands.Reply) {
+	embeds, components := reply.Embeds, reply.Components
 	if embeds == nil {
 		embeds = []*discordgo.MessageEmbed{}
 	}
-	edit := &discordgo.WebhookEdit{Content: &reply.Content, Embeds: &embeds, AllowedMentions: noMentions()}
+	if components == nil {
+		components = []discordgo.MessageComponent{}
+	}
+	edit := &discordgo.WebhookEdit{Content: &reply.Content, Embeds: &embeds, Components: &components, AllowedMentions: noMentions()}
 	if _, err := api.InteractionResponseEdit(i, edit); err != nil {
-		b.log.Warn("could not deliver command reply", "error", err)
+		b.log.Warn("could not deliver reply", "error", err)
 	}
 }
 
 func (b *Bot) autocomplete(ctx context.Context, api interactionAPI, i *discordgo.Interaction, actor auth.Actor) {
 	ctx, cancel := context.WithTimeout(ctx, autocompleteTimeout)
 	defer cancel()
-	b.respondChoices(api, i, b.reg.Complete(ctx, newRequest(actor, i.ApplicationCommandData())))
+	b.respondChoices(api, i, b.reg.Complete(ctx, newRequest(actor, i.GuildID, i.ApplicationCommandData())))
 }
 
 func (b *Bot) respondChoices(api interactionAPI, i *discordgo.Interaction, choices []*discordgo.ApplicationCommandOptionChoice) {
@@ -142,8 +154,8 @@ func (b *Bot) say(api interactionAPI, i *discordgo.Interaction, content string) 
 }
 
 // newRequest flattens Discord's option tree into a commands.Request.
-func newRequest(actor auth.Actor, data discordgo.ApplicationCommandInteractionData) commands.Request {
-	req := commands.Request{Actor: actor, Command: data.Name, Args: make(map[string]string)}
+func newRequest(actor auth.Actor, guildID string, data discordgo.ApplicationCommandInteractionData) commands.Request {
+	req := commands.Request{Actor: actor, GuildID: guildID, Command: data.Name, Args: make(map[string]string)}
 	opts := data.Options
 	if len(opts) == 1 && opts[0].Type == discordgo.ApplicationCommandOptionSubCommand {
 		req.Subcommand = opts[0].Name
