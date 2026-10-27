@@ -1,0 +1,126 @@
+# NeptHass DEVELOPMENT environment: a real Home Assistant Container with
+# virtual (template) devices, plus NeptHass built from this checkout.
+#
+# This file is for development only. It never touches the production
+# compose.yaml, uses its own project name (nepthass-dev), its own network, its
+# own volumes and its own image tag, and sets no container_name, so it can run
+# next to other containers (including a production NeptHass or Home Assistant).
+#
+# Always pass the env file, so ports and secrets come from .env.dev:
+#
+#   cp .env.dev.example .env.dev
+#   docker compose --env-file .env.dev -f compose.dev.yaml up -d              # Home Assistant only
+#   docker compose --env-file .env.dev -f compose.dev.yaml --profile app up -d --build   # + NeptHass
+#
+#   docker compose --env-file .env.dev -f compose.dev.yaml --profile test run --rm integration-tests   # real-HA tests
+#
+# Full guide: docs/development/setup.md
+name: nepthass-dev
+
+services:
+  homeassistant:
+    image: ${HA_IMAGE:-ghcr.io/home-assistant/home-assistant:2026.10.4}
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+    ports:
+      # Localhost only. Never published on other interfaces.
+      - "127.0.0.1:${HA_DEV_PORT:-18123}:8123"
+    volumes:
+      # Isolated, project-scoped volume for Home Assistant's own data.
+      - ha-config:/config
+      # Version-controlled development configuration, mounted read-only.
+      - ./dev/homeassistant/configuration.yaml:/config/configuration.yaml:ro
+      - ./dev/homeassistant/packages:/config/packages:ro
+      - ./dev/homeassistant/dashboards:/config/dashboards:ro
+    networks:
+      - dev
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      # Python ships in the Home Assistant image; any HTTP error or refusal fails the check.
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8123/', timeout=4)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  # NeptHass is in the "app" profile because it needs a Home Assistant token
+  # that only exists after you finish Home Assistant's onboarding.
+  nepthass:
+    profiles: ["app"]
+    image: nepthass-dev:local
+    build:
+      context: .
+      args:
+        VERSION: dev-local
+    # A failed start (for example a wrong token) stays stopped so the log is easy to read.
+    restart: "no"
+    env_file:
+      - path: .env.dev
+        required: false # a missing file is reported by NeptHass as a clear configuration error
+    environment:
+      # Inside this container 127.0.0.1 is the container itself, not Home
+      # Assistant. Use the Compose service name on the private network, or
+      # override NEPTHASS_DEV_HA_URL in .env.dev for another setup.
+      HA_URL: ${NEPTHASS_DEV_HA_URL:-http://homeassistant:8123}
+    networks:
+      - dev
+    depends_on:
+      - homeassistant
+    volumes:
+      - nepthass-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  # Real-Home-Assistant integration tests (no Discord). Runs Go in a container, so
+  # no local Go toolchain is needed:
+  #   docker compose --env-file .env.dev -f compose.dev.yaml --profile test run --rm integration-tests
+  integration-tests:
+    profiles: ["test"]
+    image: golang:${GO_VERSION:-1.27}-bookworm
+    working_dir: /src
+    env_file:
+      - path: .env.dev
+        required: false
+    environment:
+      HA_URL: ${NEPTHASS_DEV_HA_URL:-http://homeassistant:8123}
+      GOCACHE: /tmp/go-build
+    command: ["go", "test", "-tags=integration", "-count=1", "-v", "./tests/integration/..."]
+    networks:
+      - dev
+    depends_on:
+      homeassistant:
+        condition: service_healthy
+    volumes:
+      - .:/src:ro
+      - go-mod-cache:/go/pkg/mod
+    tmpfs:
+      - /tmp
+
+networks:
+  # Private bridge network: only the containers of this project are on it.
+  dev:
+
+volumes:
+  # "docker compose ... down -v" removes exactly these (prefixed nepthass-dev_),
+  # never volumes of other projects.
+  ha-config:
+  nepthass-data:
+  go-mod-cache:

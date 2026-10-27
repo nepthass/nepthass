@@ -5,6 +5,7 @@
 .env
 .env.*
 !.env.example
+!.env.dev.example
 .omo
 docs
 deploy
@@ -17,3 +18,5 @@ secrets
 !README.md
 Dockerfile
 compose.yaml
+compose.dev.yaml
+dev
