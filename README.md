@@ -10,12 +10,12 @@ NeptHass does not replace Home Assistant and has no device drivers. It works thr
 
 ## Project status
 
-NeptHass is being built milestone by milestone. v0.1.0 (Foundation) is released; v0.2.0 (Interactive Setup) is implemented on the `feature/v0.2.0` branch and awaiting release. Nothing below is advertised unless it is implemented and verified.
+NeptHass is being built milestone by milestone. v0.1.0 (Foundation) and v0.2.0 (Interactive Setup) are implemented. Nothing below is advertised unless it is implemented and verified.
 
 | Milestone | Scope | Status |
 | --- | --- | --- |
-| v0.1.0 | Foundation: configuration, Discord connection, Home Assistant REST client, SQLite, authorization, basic commands, Docker | **Released** |
-| v0.2.0 | Interactive `/setup` wizard, entity discovery, aliases, persistent setup sessions, `/sync` | **Implemented, awaiting release** (manual Discord checks pending) |
+| v0.1.0 | Foundation: configuration, Discord connection, Home Assistant REST client, SQLite, authorization, basic commands, Docker | **Implemented** |
+| v0.2.0 | Interactive `/setup` wizard, entity discovery, aliases, persistent setup sessions, `/sync` | **Implemented** |
 | v0.3.0 | Home Assistant WebSocket, real-time sensor monitoring, reconnection and reconciliation | Planned |
 | v0.4.0 | Smart notifications (motion, door/window, leak, battery), cooldowns, outbox | Planned |
 | v0.5.0 | Rules engine: thresholds, durations, quiet hours, hysteresis | Planned |
@@ -45,7 +45,7 @@ Details: [docs/commands.md](docs/commands.md), [docs/design/interactive-setup.md
 
 ### What does not exist yet
 
-No sensor monitoring or Home Assistant WebSocket, no alerts or notifications, no rules, no `/home` dashboard, no `/sensors`, `/alerts` or `/settings` commands. Discord notifications, when they arrive, will be best-effort and must not be relied on as an emergency alarm. The setup wizard has been verified with simulated Discord interactions and a real Home Assistant; it has not yet been exercised against a live Discord connection (see the manual checklist in [docs/development/smoke-tests.md](docs/development/smoke-tests.md)).
+No sensor monitoring or Home Assistant WebSocket, no alerts or notifications, no rules, no `/home` dashboard, no `/sensors`, `/alerts` or `/settings` commands. Discord notifications, when they arrive, will be best-effort and must not be relied on as an emergency alarm. The setup wizard is covered by automated tests (simulated Discord interactions against a real Home Assistant) and was checked by the maintainer on a live Discord server; those manual results are user-reported and listed in [docs/development/smoke-tests.md](docs/development/smoke-tests.md).
 
 ## How it works
 

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-27
+
+Second milestone: interactive setup.
+
 ### Added
 
 - `/setup`: an administrator-only interactive wizard (connection health, discover devices, permissions, aliases, review, done) built on an explicit state machine, with search, domain and "shared only" filters, pagination, select menus, modals, Back / Next / Cancel / Resume and a confirmation before anything is written.
@@ -26,6 +30,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - Development environment: the integration tests failed (31.2 C reported as 88.16 F, 21.5 C as 70.7 F) when the onboarding UI switched the Home Assistant instance to US customary units. The reset script now re-applies the pinned metric system, the suite refuses to run on a non-metric instance, and a regression test covers it.
+
+### Known limitations
+
+- No sensor monitoring, Home Assistant WebSocket, notifications, rules or `/home` dashboard yet (planned for v0.3.0 to v0.6.0).
+- A single Discord guild is supported.
+- A setup session holds at most 100 selected entities, and entities whose ID is longer than 100 characters cannot be offered in the wizard's select menu.
+- Alias uniqueness is case-insensitive but not aware of visually confusable characters from different scripts.
 
 ## [0.1.0] - 2026-10-27
 
@@ -56,5 +67,6 @@ First milestone: the foundation.
 - A single Discord guild is supported.
 - `/devices` lists 10 entities per page via a `page` option; interactive pagination arrives with the dashboard.
 
-[Unreleased]: https://github.com/nepthass/nepthass/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/nepthass/nepthass/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/nepthass/nepthass/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/nepthass/nepthass/releases/tag/v0.1.0

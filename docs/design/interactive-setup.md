@@ -1,6 +1,6 @@
 # v0.2.0 design: Interactive Setup
 
-Status: implemented on `feature/v0.2.0` (not released). This document records the decisions the implementation follows; [architecture.md](../architecture.md) describes the resulting system.
+Status: implemented in v0.2.0. This document records the decisions the implementation follows; [architecture.md](../architecture.md) describes the resulting system.
 
 ## Goal
 
