@@ -55,11 +55,26 @@ docker compose logs -f nepthass
 
 A healthy start logs `authenticated with home assistant`, `connected to discord gateway` and `slash commands registered`. Guild-scoped commands appear in Discord immediately.
 
-## 5. First commands
+## 5. Configure access with /setup
+
+Run `/setup` (administrators only). The wizard is private to you:
+
+1. **Connection health.** Discord, Home Assistant REST and SQLite are checked live. **Next** stays disabled until Home Assistant answers; setup never uses stale or invented entity data. (The Home Assistant WebSocket is not available in this release.)
+2. **Discover devices.** Real entities with name, ID, state, device class and current sharing. Use **Search...** (words from the name, ID or device class), the domain menu (including **Shared only**), **Refresh** and the page buttons. Tick the entities you want to configure in the menu and press **Next**. Large homes work: the list is paged ten at a time.
+3. **Device permissions.** Pick an entity, then **Read**, **Control** or **No access**. Control is offered for lights and switches only. **All: read** and **Lights and switches: control** apply a rule to everything selected. Newly selected entities start as read-only.
+4. **Aliases.** Optionally give entities friendly names (letters, numbers, spaces and `- ' . ( )`, up to 32 characters, unique across NeptHass). They work in `/status`, `/control` and show in `/devices`. An alias never grants access.
+5. **Review.** See exactly what is newly shared, modified or revoked, and which aliases change. Nothing has been written yet. **Confirm and apply** saves everything at once; it is disabled when there are blocking problems or nothing to change.
+6. **Done.** The configuration is active immediately; no restart is needed. Try `/devices`, `/status` and `/control`.
+
+**Interrupted setup.** Progress is saved. Run `/setup` again to **Resume** (or **Start over**), even after NeptHass restarted. A session expires after 24 hours of inactivity. **Cancel setup** applies nothing.
+
+**Keeping things in sync.** `/sync` refreshes NeptHass's view of Home Assistant and tells you which entities are new, removed or unavailable, including shared ones. It never shares anything.
+
+## 6. First commands
 
 1. `/ping` and `/health` confirm the connection.
-2. `/permissions allow entity:light.living_room access:control` (type to autocomplete from Home Assistant). Only lights and switches can be granted `control`; any entity can be granted `read`.
-3. `/devices`, `/status entity:...`, `/control entity:... action:on`.
+2. Share devices with `/setup` (above), or one at a time with `/permissions allow entity:light.living_room access:control` (autocomplete from Home Assistant). Only lights and switches can be granted `control`; any entity can be granted `read`.
+3. `/devices`, `/status entity:...`, `/control entity:... action:on` (aliases work too).
 4. `/audit` shows what happened. `/permissions list` and `/permissions revoke` manage the allowlist.
 
 Other people can use NeptHass once their user ID is in `DISCORD_ALLOWED_USER_IDS` (or `DISCORD_ADMIN_USER_IDS`); restart the container after changing it. They see only what an administrator shared.
@@ -86,7 +101,7 @@ A new machine with no Home Assistant yet can use the optional combined stack in 
 
 ## Data, retention and backups
 
-All state lives in one SQLite database at `DATABASE_PATH` (`/data/nepthass.db` in the container, on the `nepthass-data` volume). It holds the entity allowlist and the audit log; it contains no credentials.
+All state lives in one SQLite database at `DATABASE_PATH` (`/data/nepthass.db` in the container, on the `nepthass-data` volume). It holds the entity allowlist, aliases, setup sessions, the minimal known-entity registry written by `/sync` (IDs and first/last-seen times only) and the audit log; it contains no credentials.
 
 - **Audit retention:** entries older than `AUDIT_RETENTION_DAYS` (default 90) are pruned at start-up and every 6 hours.
 - **Backup:** the database runs in WAL mode, so copy it while NeptHass is stopped (or copy the `-wal` and `-shm` files with it):
@@ -110,3 +125,12 @@ docker compose up -d --build
 ```
 
 Migrations run automatically at start-up. NeptHass refuses to start on a database written by a newer version, so downgrades require restoring a backup.
+
+### From v0.1.0 to v0.2.0
+
+1. **Back up first** (see "Data, retention and backups" above). Migration 0002 only adds tables, but a backup is the way back: a v0.1.0 build refuses to start on a v0.2.0 database.
+2. Pull and rebuild as above. No configuration changes are needed and no new environment variables are required.
+3. Your existing permissions, audit log and `/permissions` workflow are untouched. The new tables (`entity_aliases`, `setup_sessions`, `known_entities`) start empty.
+4. Run `/setup` (to review and extend what is shared) and `/sync` (to record the baseline of known entities).
+
+The upgrade was verified on a copy of a real v0.1.0 database: permissions and audit rows were preserved, the schema went from one migration to two, and re-opening the database was a no-op.

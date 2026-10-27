@@ -8,19 +8,29 @@ NeptHass does not replace Home Assistant and has no device drivers. It works thr
 
 > NeptHass is an independent community project. It is not affiliated with, endorsed by, or sponsored by Home Assistant (Nabu Casa) or Discord, and it does not use their logos.
 
-## Project status: v0.1.0 (Foundation)
+## Project status
 
-NeptHass is being built milestone by milestone. This release is the foundation: a working, secure core you can run today. Nothing below is advertised unless it is implemented.
+NeptHass is being built milestone by milestone. v0.1.0 (Foundation) is released; v0.2.0 (Interactive Setup) is implemented on the `feature/v0.2.0` branch and awaiting release. Nothing below is advertised unless it is implemented and verified.
 
 | Milestone | Scope | Status |
 | --- | --- | --- |
-| v0.1.0 | Foundation: configuration, Discord connection, Home Assistant REST client, SQLite, authorization, basic commands, Docker | **Implemented** |
-| v0.2.0 | Interactive `/setup` wizard, entity discovery UI, aliases, `/sync` | Planned |
+| v0.1.0 | Foundation: configuration, Discord connection, Home Assistant REST client, SQLite, authorization, basic commands, Docker | **Released** |
+| v0.2.0 | Interactive `/setup` wizard, entity discovery, aliases, persistent setup sessions, `/sync` | **Implemented, awaiting release** (manual Discord checks pending) |
 | v0.3.0 | Home Assistant WebSocket, real-time sensor monitoring, reconnection and reconciliation | Planned |
 | v0.4.0 | Smart notifications (motion, door/window, leak, battery), cooldowns, outbox | Planned |
 | v0.5.0 | Rules engine: thresholds, durations, quiet hours, hysteresis | Planned |
 | v0.6.0 | Interactive `/home` dashboard | Planned |
 | v1.0.0 | Stable release: hardening, release workflow, full docs | Planned |
+
+### What v0.2.0 adds
+
+- `/setup`: an administrator-only, six-step wizard (connection health, discover devices, permissions, aliases, review, done) with search, domain filters, pagination, select menus, modals, Back / Next / Cancel / Resume, and an explicit confirmation before anything is written. Progress is stored in SQLite and survives restarts.
+- Aliases: human-readable names for entities, usable in `/status` and `/control`, shown in `/devices`.
+- `/sync`: refreshes the view of Home Assistant and reports new, removed and unavailable entities. It never shares anything.
+- Setup writes the same permission table as `/permissions`, applies the same rules, and is audited.
+- A migration (0002) that upgrades v0.1.0 databases in place; existing permissions and audit records are preserved.
+
+Details: [docs/commands.md](docs/commands.md), [docs/design/interactive-setup.md](docs/design/interactive-setup.md).
 
 ### What works in v0.1.0
 
@@ -35,7 +45,7 @@ NeptHass is being built milestone by milestone. This release is the foundation: 
 
 ### What does not exist yet
 
-No `/setup` wizard (access is managed with `/permissions`), no sensor monitoring, no alerts or notifications, no rules, no `/home` dashboard, no `/sync`, `/sensors`, `/alerts` or `/settings` commands. Discord notifications, when they arrive, will be best-effort and must not be relied on as an emergency alarm.
+No sensor monitoring or Home Assistant WebSocket, no alerts or notifications, no rules, no `/home` dashboard, no `/sensors`, `/alerts` or `/settings` commands. Discord notifications, when they arrive, will be best-effort and must not be relied on as an emergency alarm. The setup wizard has been verified with simulated Discord interactions and a real Home Assistant; it has not yet been exercised against a live Discord connection (see the manual checklist in [docs/development/smoke-tests.md](docs/development/smoke-tests.md)).
 
 ## How it works
 
@@ -68,7 +78,7 @@ Requirements: Linux, Docker Engine with Compose, a running Home Assistant, a Dis
    docker compose up -d --build
    docker compose logs -f nepthass
    ```
-7. **Share a device.** In Discord: `/permissions allow entity:light.living_room access:control`, then `/control entity:light.living_room action:on`.
+7. **Share devices.** In Discord run `/setup`, pick the entities to share, choose read or control, optionally add aliases, review and confirm. Then try `/devices`, `/status` and `/control`. (`/permissions allow` still works for a single entity.)
 
 The full walkthrough, bridge-network setup and secret files are in [docs/setup.md](docs/setup.md).
 
@@ -84,7 +94,7 @@ The full walkthrough, bridge-network setup and secret files are in [docs/setup.m
 | `/permissions allow|revoke|list` | admins | Manage which entities are shared and at what level |
 | `/audit [count]` | admins | Recent control attempts and permission changes |
 
-"Users" are the administrators plus anyone in `DISCORD_ALLOWED_USER_IDS`. Entity names are suggested by autocomplete.
+"Users" are the administrators plus anyone in `DISCORD_ALLOWED_USER_IDS`. Entity names are suggested by autocomplete and aliases work wherever an entity is expected. Full reference: [docs/commands.md](docs/commands.md).
 
 ## Configuration
 
@@ -125,7 +135,7 @@ No Go toolchain locally? Run the Go commands in a container: `docker run --rm -v
 
 No Home Assistant or Zigbee hardware? `compose.dev.yaml` starts a real Home Assistant Container with virtual devices (light, switch, motion, door, window, temperature, humidity, water leak and battery sensors) next to NeptHass, in an isolated Compose project that never touches your production setup. See [docs/development/setup.md](docs/development/setup.md), the [virtual devices](docs/development/virtual-devices.md), and the [smoke tests](docs/development/smoke-tests.md).
 
-More documentation: [architecture](docs/architecture.md), [setup](docs/setup.md), [security](docs/security.md), [troubleshooting](docs/troubleshooting.md).
+More documentation: [commands](docs/commands.md), [architecture](docs/architecture.md), [setup](docs/setup.md), [security](docs/security.md), [troubleshooting](docs/troubleshooting.md).
 
 ## License
 
