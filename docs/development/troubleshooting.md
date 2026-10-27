@@ -14,6 +14,8 @@ docker compose --env-file .env.dev -f compose.dev.yaml logs --tail=100 nepthass
 
 **`unknown field "required"` or similar when running Compose.** Your Compose is older than v2.24. Update Docker Desktop or the Compose plugin (`docker compose version`).
 
+**Git Bash on Windows turns `/some/path` arguments into `C:/Program Files/Git/some/path`** (for example `ls: C:/Program Files/Git/config/packages: No such file or directory`, or `the working directory 'C:/Program Files/Git/src' is invalid`). Prefix the command with `MSYS_NO_PATHCONV=1`, for example `MSYS_NO_PATHCONV=1 docker compose --env-file .env.dev -f compose.dev.yaml exec homeassistant ls /config/packages`, or run the command from PowerShell, which does not rewrite paths.
+
 **`port is already allocated` for 18123.** Another program uses it. Set a different `HA_DEV_PORT` in `.env.dev` and recreate: `docker compose --env-file .env.dev -f compose.dev.yaml up -d`.
 
 **The Docker engine does not respond (`docker version` hangs).** This is a Docker Desktop problem, not NeptHass. Restart Docker Desktop from its tray icon, wait until it says it is running, and try again. Restarting Docker Desktop stops all your containers temporarily, so do it deliberately.
@@ -26,7 +28,7 @@ docker compose --env-file .env.dev -f compose.dev.yaml logs --tail=100 nepthass
 
 **The image cannot be pulled.** Check your internet connection and that `ghcr.io` is reachable. The default image is pinned in `compose.dev.yaml`; override it with `HA_IMAGE` in `.env.dev` to use another version (the template syntax in `dev/homeassistant` targets 2026.10).
 
-**The `nepthass_dev_*` entities are missing.** Open **Settings > System > Logs** or the container log and look for `template` or `Invalid config` errors. Confirm the mounts: `docker compose --env-file .env.dev -f compose.dev.yaml exec homeassistant ls /config/packages` should list four YAML files. After editing the files, restart Home Assistant.
+**The `nepthass_dev_*` entities are missing.** Open **Settings > System > Logs** or the container log and look for `template` or `Invalid config` errors. Confirm the mounts: `docker compose --env-file .env.dev -f compose.dev.yaml exec homeassistant ls /config/packages` should list four YAML files (in Git Bash prefix it with `MSYS_NO_PATHCONV=1`, see above). After editing the files, restart Home Assistant.
 
 **Entities have the wrong ID (for example a `_2` suffix).** Home Assistant remembers entities by `unique_id` in its own volume. Reset only Home Assistant's data (see [setup.md](setup.md), "Resetting only development data").
 

@@ -178,7 +178,7 @@ Unit tests need no Docker Home Assistant and no Discord:
 
 ```bash
 go test -race -shuffle=on -count=1 ./...
-# without a local Go toolchain:
+# without a local Go toolchain (in Git Bash on Windows prefix with MSYS_NO_PATHCONV=1, see troubleshooting.md):
 docker run --rm -v "$PWD":/src -w /src golang:1.27 go test -race -shuffle=on -count=1 ./...
 ```
 
