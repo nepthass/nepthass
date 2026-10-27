@@ -1,0 +1,55 @@
+# OPTIONAL example for a brand-new machine: Home Assistant Container and
+# NeptHass in one stack. If you already run Home Assistant, do NOT use this
+# file - use the standalone compose.yaml in the repository root instead; it
+# never touches an existing installation.
+#
+# Run from the repository root:
+#   cp .env.example .env
+#   docker compose -f deploy/compose.with-homeassistant.yaml up -d --build
+#
+# Home Assistant is then at http://<host>:8123. Create your account, create a
+# Long-Lived Access Token (profile page), put it in .env as HA_TOKEN and
+# restart NeptHass: docker compose -f deploy/compose.with-homeassistant.yaml restart nepthass
+name: smarthome
+
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: homeassistant
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - homeassistant-config:/config
+      - /etc/localtime:/etc/localtime:ro
+    # Zigbee/Z-Wave dongle: pass the stable device path through, for example:
+    # devices:
+    #   - /dev/serial/by-id/usb-EXAMPLE_dongle:/dev/ttyUSB0
+
+  nepthass:
+    image: nepthass:latest
+    build:
+      context: ..
+      args:
+        VERSION: ${NEPTHASS_VERSION:-dev}
+    container_name: nepthass
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - path: ../.env
+        required: false
+    depends_on:
+      - homeassistant
+    volumes:
+      - nepthass-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
+
+volumes:
+  homeassistant-config:
+  nepthass-data:
