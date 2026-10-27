@@ -7,7 +7,7 @@ Thanks for helping. NeptHass controls real homes, so changes are reviewed with s
 You need Go (see `go.mod` for the version) or Docker.
 
 ```bash
-git clone https://github.com/nepthass/nepthass.git && cd nepthass
+git clone https://github.com/JameelSawafta/nepthass.git && cd nepthass
 go build ./cmd/nepthass
 ```
 
