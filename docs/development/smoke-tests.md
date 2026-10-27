@@ -262,3 +262,20 @@ These were produced by commands run against the release tree, never by a person 
 | Security regression suite: 16 injected regressions of the setup, authorization, alias and escaping controls | all 16 caught by tests |
 | Migration compatibility: v0.1.0 to v0.2.0 upgrade test, and a read-only copy of a real development database | upgrade preserves grants and audit rows; the copy passes SQLite's integrity check and re-opens as a no-op |
 | `docker compose config` (production, combined example, development with all profiles) and the image build and hardened boot against the real Home Assistant | pass |
+
+### v0.3.0 (`feature/v0.3.0`, unreleased): automated results (executed by the assistant, not manual)
+
+These were produced by commands run against the branch, never by a person in Discord. **Manual group H (L01 to L18) was not executed**: the assistant has no Discord credentials, so no Discord behavior of `/sensors` or the new `/health` line is verified here, and v0.3.0 is not release-ready until the owner runs that checklist.
+
+| Check | Result |
+| --- | --- |
+| `gofmt -l .`, `go vet ./...`, `go vet -tags=integration ./tests/integration/...` | clean |
+| `go test -race -shuffle=on -count=1 ./...` | 13 packages pass; 227 passing test lines including subtests; 0 failures, 0 skips |
+| Stress runs during development | `go test -race -shuffle=on -count=10 ./internal/monitor` and `-count=20 ./internal/homeassistant/ws` pass |
+| Integration suite against a real Home Assistant 2026.10.4 (`go test -tags=integration -race`) | 28 tests (the 21 from v0.1.0 and v0.2.0 plus 7 monitoring tests), 0 failures, 0 skips |
+| Real Home Assistant container restart (a temporary probe, not committed, with the container restarted from outside) | the monitor left `ready`, reported failure category `network` and not healthy while keeping its 7 cached sensors, then recovered by itself after about 14 seconds with a fresh synchronized snapshot and 0 invalid or dropped events |
+| Ping and pong against real Home Assistant (a temporary probe, not committed) | over 7 seconds with a 2 second read timeout and no sensor events, the connection stayed healthy with 0 reconnects, so Home Assistant answers the application-level ping |
+| Regression injection into the security and correctness controls | 20 deliberate regressions, one at a time (permission check removed, stale or duplicate event guards removed, snapshot ordering reversed, buffered events dropped, health ignoring readiness or proof of life, token echoed in an error, read limit removed, unescaped names, and others); all 20 caught. One needed an added assertion (stale flag in listings) and one was first misreported as surviving because of a harness timeout and was re-run correctly |
+| `docker compose config` for `compose.yaml`, `deploy/compose.with-homeassistant.yaml` and `compose.dev.yaml` (all profiles) | pass; the production files are byte-identical to v0.2.0 |
+| Image build and a hardened container (read-only root, all capabilities dropped, no-new-privileges) started against the real Home Assistant with fake Discord credentials | the application authenticated, the monitor authenticated, subscribed and synchronized 7 sensors, and `home assistant monitoring stopped` was logged before the process exited when Discord rejected the fake token; no token in the logs. No Discord connection was made |
+| Documentation links | 17 Markdown files, 67 relative links checked; one broken anchor from before v0.3.0 (`docs/commands.md` to `setup.md`) |
