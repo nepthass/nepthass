@@ -29,7 +29,7 @@ docker compose config --quiet
 docker build -t nepthass:dev .
 ```
 
-CI runs the same checks. Tests must **never** need live Discord or Home Assistant credentials: use `httptest` servers (see `tests/fakeha`) and temporary SQLite files (`t.TempDir()`). Tests must be deterministic: no fixed sleeps, wait on the event or state you care about with a bounded timeout. Assert behavior and machine-consumed values, not prose.
+CI runs the same checks. To try NeptHass against a real Home Assistant without any hardware, use the local development environment in [docs/development/setup.md](docs/development/setup.md); the integration tests behind the `integration` build tag run against it (`docs/development/smoke-tests.md`). Tests must **never** need live Discord or Home Assistant credentials: use `httptest` servers (see `tests/fakeha`) and temporary SQLite files (`t.TempDir()`). Tests must be deterministic: no fixed sleeps, wait on the event or state you care about with a bounded timeout. Assert behavior and machine-consumed values, not prose.
 
 ## Code style
 
