@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Development environment (`compose.dev.yaml`, `.env.dev.example`, `dev/homeassistant`): a real Home Assistant Container with virtual light, switch, motion, door, window, temperature, humidity, water-leak and battery entities, an optional NeptHass service, and one-click simulation scenarios (including unavailable sensors), in an isolated Compose project with localhost-only access.
+- Integration tests against that real Home Assistant (`go test -tags=integration ./tests/integration/...`), runnable without a local Go toolchain through the `test` Compose profile.
+- Development guides: setup, virtual devices and simulation, smoke-test checklist (automated and manual Discord checks kept separate), troubleshooting.
+
 ## [0.1.0] - 2026-10-27
 
 First milestone: the foundation.

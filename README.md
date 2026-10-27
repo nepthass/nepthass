@@ -121,6 +121,10 @@ docker build -t nepthass:dev .
 
 No Go toolchain locally? Run the Go commands in a container: `docker run --rm -v "$PWD":/src -w /src golang:1.27 go test ./...`. Tests use mock servers and temporary SQLite files; they never need Discord or Home Assistant credentials. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+### Local development environment
+
+No Home Assistant or Zigbee hardware? `compose.dev.yaml` starts a real Home Assistant Container with virtual devices (light, switch, motion, door, window, temperature, humidity, water leak and battery sensors) next to NeptHass, in an isolated Compose project that never touches your production setup. See [docs/development/setup.md](docs/development/setup.md), the [virtual devices](docs/development/virtual-devices.md), and the [smoke tests](docs/development/smoke-tests.md).
+
 More documentation: [architecture](docs/architecture.md), [setup](docs/setup.md), [security](docs/security.md), [troubleshooting](docs/troubleshooting.md).
 
 ## License
