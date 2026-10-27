@@ -54,9 +54,12 @@ func (r *Registry) devices(ctx context.Context, req Request) Reply {
 
 func deviceLine(d entities.Device) string {
 	if d.State == nil {
+		if d.Alias != "" {
+			return fmt.Sprintf("%s **%s** `%s` - not found in Home Assistant", iconWarn, escape(d.Alias), d.ID)
+		}
 		return fmt.Sprintf("%s `%s` - not found in Home Assistant", iconWarn, d.ID)
 	}
-	return fmt.Sprintf("%s **%s** `%s` - %s (%s)", stateIcon(*d.State), escape(d.State.FriendlyName()), d.ID, describeState(*d.State), d.Access)
+	return fmt.Sprintf("%s **%s** `%s` - %s (%s)", stateIcon(*d.State), escape(d.State.DisplayName()), d.ID, describeState(*d.State), d.Access)
 }
 
 func stateIcon(s entities.State) string {
@@ -91,7 +94,7 @@ func (r *Registry) cmdStatus() command {
 }
 
 func (r *Registry) status(ctx context.Context, req Request) Reply {
-	id, err := entities.ParseID(req.Args["entity"])
+	id, err := r.deps.Entities.Resolve(ctx, req.Actor, req.Args["entity"], entities.AccessRead)
 	if err != nil {
 		return r.fail(req, err)
 	}
@@ -103,10 +106,13 @@ func (r *Registry) status(ctx context.Context, req Request) Reply {
 	if !st.Reliable() {
 		color = colorWarn
 	}
-	e := newEmbed("Status", "**"+escape(st.FriendlyName())+"**", color)
+	e := newEmbed("Status", "**"+escape(st.DisplayName())+"**", color)
 	e.Fields = []*discordgo.MessageEmbedField{
 		field("Entity", "`"+string(st.ID)+"`", true),
 		field("State", stateIcon(st)+" "+describeState(st), true),
+	}
+	if st.Alias != "" {
+		e.Fields = append(e.Fields, field("Home Assistant name", escape(st.FriendlyName()), true))
 	}
 	if dc := st.DeviceClass(); dc != "" {
 		e.Fields = append(e.Fields, field("Device class", escape(dc), true))
@@ -134,7 +140,7 @@ func (r *Registry) cmdControl() command {
 }
 
 func (r *Registry) control(ctx context.Context, req Request) Reply {
-	id, err := entities.ParseID(req.Args["entity"])
+	id, err := r.deps.Entities.Resolve(ctx, req.Actor, req.Args["entity"], entities.AccessControl)
 	if err != nil {
 		return r.fail(req, err)
 	}
@@ -153,7 +159,7 @@ func (r *Registry) control(ctx context.Context, req Request) Reply {
 		stateText += " (Home Assistant has not reported a change yet; devices can take a moment)"
 	}
 	e := newEmbed("Command Sent", fmt.Sprintf("Turned **%s** `%s`.\n%s", action, id, stateText), colorOK)
-	e.Fields = []*discordgo.MessageEmbedField{field("Entity", escape(res.Before.FriendlyName()), false)}
+	e.Fields = []*discordgo.MessageEmbedField{field("Entity", escape(res.Before.DisplayName()), false)}
 	return Reply{Embeds: []*discordgo.MessageEmbed{e}}
 }
 
@@ -163,14 +169,19 @@ func (r *Registry) permitted(minimum entities.Access) completer {
 		if req.Focused != "entity" {
 			return nil
 		}
-		ids, err := r.deps.Entities.Suggest(ctx, req.Actor, minimum, req.Args["entity"])
+		suggestions, err := r.deps.Entities.Suggest(ctx, req.Actor, minimum, req.Args["entity"])
 		if err != nil {
 			r.deps.Logger.Debug("autocomplete failed", "command", req.Command, "error", err)
 			return nil
 		}
-		choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(ids))
-		for _, id := range ids {
-			choices = append(choices, choice(string(id), string(id)))
+		choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(suggestions))
+		for _, s := range suggestions {
+			label := string(s.ID)
+			if s.Alias != "" {
+				label = s.Alias + " (" + string(s.ID) + ")"
+			}
+			// The submitted value is always the canonical entity ID.
+			choices = append(choices, choice(label, string(s.ID)))
 		}
 		return choices
 	}

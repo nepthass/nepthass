@@ -116,6 +116,9 @@ type State struct {
 	Attributes  map[string]any
 	LastChanged time.Time
 	LastUpdated time.Time
+	// Alias is the administrator-assigned alias, filled in by Service for
+	// entities the caller may see ("" when none).
+	Alias string
 }
 
 // Reliable reports whether the entity reported a real value. Unavailable and
@@ -130,6 +133,14 @@ func (s State) FriendlyName() string {
 		return name
 	}
 	return string(s.ID)
+}
+
+// DisplayName is the alias when one is set, otherwise Home Assistant's friendly name.
+func (s State) DisplayName() string {
+	if s.Alias != "" {
+		return s.Alias
+	}
+	return s.FriendlyName()
 }
 
 // DeviceClass returns the device_class attribute ("" when absent).

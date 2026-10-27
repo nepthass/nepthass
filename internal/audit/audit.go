@@ -37,11 +37,21 @@ type Entry struct {
 	Detail   string
 }
 
+// queryer is satisfied by both *sql.DB and *sql.Tx.
+type queryer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
 // Log stores and queries audit entries.
-type Log struct{ db *sql.DB }
+type Log struct{ q queryer }
 
 // New returns an audit log backed by db.
-func New(db *sql.DB) *Log { return &Log{db: db} }
+func New(db *sql.DB) *Log { return &Log{q: db} }
+
+// WithTx returns a log whose writes join tx, so an audit entry commits or rolls
+// back together with the change it describes.
+func (l *Log) WithTx(tx *sql.Tx) *Log { return &Log{q: tx} }
 
 // Record appends an entry. Detail is truncated to keep rows small.
 func (l *Log) Record(ctx context.Context, e Entry) error {
@@ -53,7 +63,7 @@ func (l *Log) Record(ctx context.Context, e Entry) error {
 	if e.EntityID != "" {
 		entity = e.EntityID
 	}
-	_, err := l.db.ExecContext(ctx,
+	_, err := l.q.ExecContext(ctx,
 		"INSERT INTO command_audit_logs (occurred_at, actor_id, command, entity_id, action, outcome, detail) VALUES (?, ?, ?, ?, ?, ?, ?)",
 		storage.FormatTime(e.Time), e.ActorID, e.Command, entity, e.Action, string(e.Outcome), detail)
 	if err != nil {
@@ -64,7 +74,7 @@ func (l *Log) Record(ctx context.Context, e Entry) error {
 
 // Recent returns up to limit entries, newest first.
 func (l *Log) Recent(ctx context.Context, limit int) ([]Entry, error) {
-	rows, err := l.db.QueryContext(ctx,
+	rows, err := l.q.QueryContext(ctx,
 		"SELECT occurred_at, actor_id, command, COALESCE(entity_id, ''), action, outcome, detail FROM command_audit_logs ORDER BY id DESC LIMIT ?", limit)
 	if err != nil {
 		return nil, fmt.Errorf("query audit log: %w", err)
@@ -91,7 +101,7 @@ func (l *Log) Recent(ctx context.Context, limit int) ([]Entry, error) {
 
 // Prune deletes entries older than cutoff and returns how many were removed.
 func (l *Log) Prune(ctx context.Context, cutoff time.Time) (int64, error) {
-	res, err := l.db.ExecContext(ctx, "DELETE FROM command_audit_logs WHERE occurred_at < ?", storage.FormatTime(cutoff))
+	res, err := l.q.ExecContext(ctx, "DELETE FROM command_audit_logs WHERE occurred_at < ?", storage.FormatTime(cutoff))
 	if err != nil {
 		return 0, fmt.Errorf("prune audit log: %w", err)
 	}

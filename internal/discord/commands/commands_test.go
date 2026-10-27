@@ -29,10 +29,11 @@ var (
 )
 
 type env struct {
-	reg   *commands.Registry
-	ha    *fakeha.Server
-	perms *entities.Permissions
-	log   *audit.Log
+	reg     *commands.Registry
+	ha      *fakeha.Server
+	perms   *entities.Permissions
+	aliases *entities.Aliases
+	log     *audit.Log
 }
 
 func newEnv(t *testing.T) env {
@@ -46,13 +47,14 @@ func newEnv(t *testing.T) env {
 	client := rest.New(config.HomeAssistant{URL: ha.URL, Token: haToken, Timeout: 2 * time.Second})
 	auditLog := audit.New(db)
 	perms := entities.NewPermissions(db)
+	aliases := entities.NewAliases(db)
 	logger := slog.New(slog.DiscardHandler)
-	svc := entities.NewService(entities.Deps{HA: client, Permissions: perms, Audit: auditLog, Logger: logger, Now: time.Now})
+	svc := entities.NewService(entities.Deps{HA: client, Permissions: perms, Aliases: aliases, Audit: auditLog, Logger: logger, Now: time.Now})
 	reg := commands.New(commands.Deps{
 		Entities: svc, Audit: auditLog, HA: client, DB: db, Logger: logger, Version: "test",
 		Gateway: func() commands.Gateway { return commands.Gateway{Connected: true, Latency: 42 * time.Millisecond} },
 	})
-	return env{reg: reg, ha: ha, perms: perms, log: auditLog}
+	return env{reg: reg, ha: ha, perms: perms, aliases: aliases, log: auditLog}
 }
 
 func (e env) grant(t *testing.T, id string, access entities.Access) {
@@ -349,5 +351,37 @@ func TestDefinitions_satisfyDiscordConstraints(t *testing.T) {
 	}
 	if got := strings.Join(names, ","); got != "ping,health,devices,status,control,permissions,audit" {
 		t.Errorf("commands = %s", got)
+	}
+}
+
+func TestAliases_workInStatusControlDevicesAndAutocomplete_withoutExposingUnsharedEntities(t *testing.T) {
+	e := newEnv(t)
+	e.ha.Set("light.kitchen", "off", map[string]any{"friendly_name": "Kitchen Ceiling"})
+	e.ha.Set("light.secret", "off", map[string]any{"friendly_name": "Hidden"})
+	e.grant(t, "light.kitchen", entities.AccessControl)
+	for id, alias := range map[string]string{"light.kitchen": "Kitchen", "light.secret": "Secret Lamp"} {
+		if err := e.aliases.Set(context.Background(), entities.AliasSet{ID: entities.ID(id), Alias: alias, By: admin.UserID, At: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	status := e.run(user, "status", "", map[string]string{"entity": "kitchen"})
+	control := e.run(user, "control", "", map[string]string{"entity": "KITCHEN", "action": "on"})
+	devices := e.run(user, "devices", "", nil)
+	secret := e.run(user, "status", "", map[string]string{"entity": "Secret Lamp"})
+	complete := e.reg.Complete(context.Background(), commands.Request{Actor: user, Command: "control", Focused: "entity", Args: map[string]string{"entity": "kitch"}})
+
+	mustContain(t, status, "**Kitchen**", "Home Assistant name", "Kitchen Ceiling")
+	mustContain(t, control, "Command Sent", "Kitchen")
+	if calls := e.ha.Calls(); len(calls) != 1 || calls[0].EntityID != "light.kitchen" {
+		t.Errorf("alias did not resolve to the canonical entity: %+v", calls)
+	}
+	mustContain(t, devices, "**Kitchen**", "light.kitchen")
+	mustContain(t, secret, "not a valid entity ID", "alias")
+	if strings.Contains(secret, "Hidden") || strings.Contains(devices, "Secret Lamp") || strings.Contains(devices, "light.secret") {
+		t.Errorf("an unshared entity leaked:\n%s\n%s", secret, devices)
+	}
+	if len(complete) != 1 || complete[0].Name != "Kitchen (light.kitchen)" || complete[0].Value != "light.kitchen" {
+		t.Errorf("autocomplete = %+v, want the alias in the label and the canonical ID as the value", complete)
 	}
 }
