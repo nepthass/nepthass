@@ -19,6 +19,7 @@ import (
 	"github.com/nepthass/nepthass/internal/entities"
 	"github.com/nepthass/nepthass/internal/homeassistant/rest"
 	"github.com/nepthass/nepthass/internal/logging"
+	"github.com/nepthass/nepthass/internal/setup"
 	"github.com/nepthass/nepthass/internal/storage"
 )
 
@@ -68,12 +69,17 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 	}
 
 	auditLog := audit.New(db)
+	perms, aliases := entities.NewPermissions(db), entities.NewAliases(db)
 	service := entities.NewService(entities.Deps{
-		HA: ha, Permissions: entities.NewPermissions(db), Aliases: entities.NewAliases(db), Audit: auditLog, Logger: log, Now: time.Now,
+		HA: ha, Permissions: perms, Aliases: aliases, Audit: auditLog, Logger: log, Now: time.Now,
+	})
+	discovery := entities.NewDiscovery(entities.DiscoveryDeps{HA: ha, DB: db, Permissions: perms, Now: time.Now})
+	setupService := setup.NewService(setup.Deps{
+		DB: db, Store: setup.NewStore(db), Discovery: discovery, Permissions: perms, Aliases: aliases, Audit: auditLog, Now: time.Now,
 	})
 	bot, err := discord.New(cfg.Discord, commands.Deps{
-		Entities: service, Audit: auditLog, HA: ha, DB: db, Version: version, Logger: log,
-	})
+		Entities: service, Discovery: discovery, Audit: auditLog, HA: ha, DB: db, Version: version, Logger: log,
+	}, setupService)
 	if err != nil {
 		return err
 	}

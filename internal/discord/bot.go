@@ -17,6 +17,8 @@ import (
 	"github.com/nepthass/nepthass/internal/auth"
 	"github.com/nepthass/nepthass/internal/config"
 	"github.com/nepthass/nepthass/internal/discord/commands"
+	"github.com/nepthass/nepthass/internal/discord/wizard"
+	"github.com/nepthass/nepthass/internal/setup"
 )
 
 const (
@@ -33,14 +35,19 @@ type Bot struct {
 	log     *slog.Logger
 	auth    *auth.Authorizer
 	limiter *auth.Limiter
-	reg     *commands.Registry
-	session *discordgo.Session
-	ready   atomic.Bool
-	retry   backoff
+	// componentLimiter is separate from the command limiter: a wizard session
+	// legitimately produces many quick clicks.
+	componentLimiter *auth.Limiter
+	wizard           Wizard
+	reg              *commands.Registry
+	session          *discordgo.Session
+	ready            atomic.Bool
+	retry            backoff
 }
 
-// New prepares the bot without connecting. deps.Gateway is filled in here.
-func New(cfg config.Discord, deps commands.Deps) (*Bot, error) {
+// New prepares the bot without connecting. deps.Gateway and deps.Setup are
+// filled in here. The setup wizard is built on top of setupService.
+func New(cfg config.Discord, deps commands.Deps, setupService *setup.Service) (*Bot, error) {
 	session, err := discordgo.New("Bot " + cfg.Token.Reveal())
 	if err != nil {
 		return nil, fmt.Errorf("create discord session: %w", err)
@@ -51,14 +58,22 @@ func New(cfg config.Discord, deps commands.Deps) (*Bot, error) {
 	routeLibraryLogs(deps.Logger)
 
 	b := &Bot{
-		cfg:     cfg,
-		log:     deps.Logger,
-		auth:    auth.NewAuthorizer(cfg),
-		limiter: auth.NewLimiter(rateLimitBurst, rateLimitWindow, time.Now),
-		session: session,
-		retry:   backoff{initial: time.Second, max: time.Minute},
+		cfg:              cfg,
+		log:              deps.Logger,
+		auth:             auth.NewAuthorizer(cfg),
+		limiter:          auth.NewLimiter(rateLimitBurst, rateLimitWindow, time.Now),
+		componentLimiter: auth.NewLimiter(componentBurst, componentWindow, time.Now),
+		session:          session,
+		retry:            backoff{initial: time.Second, max: time.Minute},
 	}
 	deps.Gateway = b.gateway
+	if setupService != nil {
+		b.wizard = wizard.New(wizard.Deps{
+			Service: setupService, Version: deps.Version, Logger: deps.Logger,
+			Prober: wizard.ProberFunc(func(ctx context.Context) commands.HealthReport { return b.reg.Probe(ctx) }),
+		})
+		deps.Setup = b.wizard
+	}
 	b.reg = commands.New(deps)
 	return b, nil
 }
