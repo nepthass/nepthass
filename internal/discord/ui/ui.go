@@ -103,3 +103,11 @@ func DescribeValue(state, unit string, reliable bool) string {
 
 // DescribeState is DescribeValue for a state.
 func DescribeState(s entities.State) string { return DescribeValue(s.State, s.Unit(), s.Reliable()) }
+
+// Entity returns "entity" or "entities" to match n.
+func Entity(n int) string {
+	if n == 1 {
+		return "entity"
+	}
+	return "entities"
+}

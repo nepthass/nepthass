@@ -48,12 +48,12 @@ func (r *Registry) sync(ctx context.Context, req Request) Reply {
 	if len(report.SharedMissing) > 0 || len(report.SharedUnavailable) > 0 {
 		color = ui.ColorWarn
 	}
-	desc := fmt.Sprintf("Home Assistant reports **%d** entities (%d can be controlled: lights and switches).", report.Total, report.Controllable)
+	desc := fmt.Sprintf("Home Assistant reports **%d** %s (%d can be controlled: lights and switches).", report.Total, ui.Entity(report.Total), report.Controllable)
 	if report.FirstSync {
 		desc += "\nThis is the first synchronization: the current entities were recorded as the baseline, so none are reported as new."
 	}
 	if report.Skipped > 0 {
-		desc += fmt.Sprintf("\n%d entities have IDs too long to offer in the setup wizard.", report.Skipped)
+		desc += fmt.Sprintf("\n%d %s cannot be offered in the setup wizard: the ID is longer than 100 characters.", report.Skipped, ui.Entity(report.Skipped))
 	}
 	e := ui.Embed("Sync", desc, color)
 	add := func(name string, ids []entities.ID, empty string) {

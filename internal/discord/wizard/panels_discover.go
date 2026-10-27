@@ -23,7 +23,7 @@ func discoverPanel(sess setup.Session, v setup.DiscoverView, notice string) comm
 	view := sess.Draft.View
 	var b strings.Builder
 	b.WriteString(progress(sess.Step, "Discover devices") + "\n")
-	fmt.Fprintf(&b, "Home Assistant: %s Connected \u00b7 Discovered: **%d** entities \u00b7 Matches: **%d** \u00b7 Selected: **%d**\n", ui.IconOK, v.Total, v.Matches, v.Selected)
+	fmt.Fprintf(&b, "Home Assistant: %s Connected \u00b7 Discovered: **%d** %s \u00b7 Matches: **%d** \u00b7 Selected: **%d**\n", ui.IconOK, v.Total, ui.Entity(v.Total), v.Matches, v.Selected)
 	fmt.Fprintf(&b, "Updated %s", ui.Relative(v.FetchedAt))
 	var filters []string
 	if view.Query != "" {
@@ -49,7 +49,7 @@ func discoverPanel(sess setup.Session, v setup.DiscoverView, notice string) comm
 		b.WriteString(discoverLine(it) + "\n")
 	}
 	if v.Skipped > 0 {
-		fmt.Fprintf(&b, "\n%s %d entities have IDs too long to offer here.", ui.IconWarn, v.Skipped)
+		fmt.Fprintf(&b, "\n%s %d %s cannot be offered here: the ID is longer than 100 characters.", ui.IconWarn, v.Skipped, ui.Entity(v.Skipped))
 	}
 	e := ui.Embed("Setup", b.String(), ui.ColorOK)
 	e.Footer = &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Page %d of %d. Tick entities in the menu, then press Next. Nothing is applied yet.", v.Page, v.Pages)}
@@ -111,7 +111,7 @@ func domainOptions(view setup.View, v setup.DiscoverView) []discordgo.SelectMenu
 		if i == maxDomains {
 			break
 		}
-		opts = append(opts, option(string(d.Domain), fmt.Sprintf("%d entities", d.Count), string(d.Domain), view.Domain == string(d.Domain) && !view.Shared))
+		opts = append(opts, option(string(d.Domain), fmt.Sprintf("%d %s", d.Count, ui.Entity(d.Count)), string(d.Domain), view.Domain == string(d.Domain) && !view.Shared))
 	}
 	return opts
 }

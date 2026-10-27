@@ -321,7 +321,7 @@ func TestEveryPanel_respectsDiscordLimits_andEscapesHostileHomeAssistantText(t *
 	if !strings.Contains(hostileFirstPage, "\\@everyone") || !strings.Contains(hostileFirstPage, "unavailable (not reporting)") {
 		t.Errorf("escaped name or unavailable marker missing:\n%s", hostileFirstPage)
 	}
-	if !strings.Contains(hostileFirstPage, "1 entities have IDs too long") {
+	if !strings.Contains(hostileFirstPage, "1 entity cannot be offered here") {
 		t.Errorf("entities that cannot be offered must be counted:\n%s", hostileFirstPage)
 	}
 	if !strings.Contains(text(done), "Setup complete") {
@@ -533,7 +533,7 @@ func TestResume_offersContinueOrStartOver_andKeepsProgress(t *testing.T) {
 	oldID, _ := parseID(mustFind(t, selected, actNext).customID)
 	old, oldErr := e.svc.Get(ctx, setup.Caller{Actor: admin, GuildID: guild}, oldID.sid)
 
-	if !strings.Contains(text(prompt), "step 2 of 6") || !strings.Contains(text(prompt), "**1** entities selected") {
+	if !strings.Contains(text(prompt), "step 2 of 6") || !strings.Contains(text(prompt), "**1** entity selected") {
 		t.Errorf("resume prompt = %s", text(prompt))
 	}
 	if !strings.Contains(text(resumed), "Selected: **1**") || !strings.Contains(text(resumed), "Discover devices") {
