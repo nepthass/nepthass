@@ -349,7 +349,7 @@ func TestDefinitions_satisfyDiscordConstraints(t *testing.T) {
 		}
 		checkOptions("/"+d.Name, d.Options)
 	}
-	if got := strings.Join(names, ","); got != "ping,health,devices,status,control,permissions,audit" {
+	if got := strings.Join(names, ","); got != "ping,health,devices,status,control,permissions,audit,setup,sync" {
 		t.Errorf("commands = %s", got)
 	}
 }
