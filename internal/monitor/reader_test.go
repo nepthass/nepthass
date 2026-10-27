@@ -165,15 +165,23 @@ func TestReader_marksDataFreshOnlyWhileMonitoringIsHealthy(t *testing.T) {
 	reader := NewReader(r.m, perms, aliases)
 
 	fresh, _ := reader.Sensor(rootCtx, user, "sensor.temp")
+	freshList, _ := reader.Sensors(rootCtx, user, 1)
 	r.srv.Down()
 	r.wait(func(s Status) bool { return s.State == StateReconnecting })
 	stale, _ := reader.Sensor(rootCtx, user, "sensor.temp")
+	staleList, _ := reader.Sensors(rootCtx, user, 1)
 
 	if fresh.Stale || fresh.Raw != "21.5" {
 		t.Errorf("healthy read = %+v", fresh)
 	}
 	if !stale.Stale || stale.Raw != "21.5" {
 		t.Errorf("after the connection dropped the last value stays readable but must be marked stale: %+v", stale)
+	}
+	if len(freshList.Views) != 1 || freshList.Views[0].Stale || !freshList.Status.Healthy {
+		t.Errorf("a healthy listing must not mark sensors stale: %+v", freshList)
+	}
+	if len(staleList.Views) != 1 || !staleList.Views[0].Stale || staleList.Status.Healthy {
+		t.Errorf("a listing taken while monitoring is down must mark every sensor stale: %+v", staleList)
 	}
 }
 
