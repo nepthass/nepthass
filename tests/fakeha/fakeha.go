@@ -78,6 +78,17 @@ func (s *Server) clockLocked() time.Time {
 	return time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC).Add(time.Duration(s.tick) * time.Millisecond)
 }
 
+// Object returns the state object the server currently serves for an entity
+// (nil when it does not exist), exactly as a snapshot or event would carry it.
+func (s *Server) Object(id string) map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.entities[id]; !ok {
+		return nil
+	}
+	return s.render(id)
+}
+
 // Calls returns a copy of every service call received so far.
 func (s *Server) Calls() []Call {
 	s.mu.Lock()
