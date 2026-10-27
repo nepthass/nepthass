@@ -109,6 +109,10 @@ Invoke-RestMethod -Method Post -Headers $h -ContentType 'application/json' -Body
 Invoke-RestMethod -Headers $h -Uri "$base/api/states/binary_sensor.nepthass_dev_water_leak"
 ```
 
+## Using them with the setup wizard (v0.2.0)
+
+Every virtual entity appears in the wizard's discovery list, so the whole flow (discover, share, alias, review, apply, `/sync`) can be exercised without hardware. Only the light and the switch can be given `control`. The offline scenario makes entities report `unavailable`, which the wizard shows as "not reporting" and `/sync` lists for shared entities.
+
 ## Triggers for the upcoming milestones
 
 These are the situations the v0.3.0 (real-time monitoring) and v0.4.0 (notifications) work will need. Nothing in NeptHass v0.1.0 listens for these events yet: today you can only observe them with `/status` and `/devices`.

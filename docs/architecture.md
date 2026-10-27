@@ -8,15 +8,19 @@ internal/config         environment parsing and validation, Secret type
 internal/logging        slog logger with secret scrubbing
 internal/storage        SQLite open + migration runner      <- migrations/ (embedded SQL)
 internal/auth           guild/user allowlists, rate limiter
-internal/audit          audit log table + retention
-internal/entities       entity model, permission table, Service (the business rules)
+internal/audit          audit log table + retention (usable inside a transaction)
+internal/entities       entity model, permissions, aliases, discovery cache, sync registry, the shared grant rule, Service
+internal/setup          setup sessions: state machine, store, plan, atomic apply (Discord-free)
 internal/homeassistant/rest   Home Assistant REST client (service allowlist)
-internal/discord        gateway session, interaction routing, retry/backoff
+internal/discord        gateway session, interaction routing, component and modal handling, retry/backoff
 internal/discord/commands     slash command definitions and replies
-tests/fakeha            in-memory Home Assistant used by tests
+internal/discord/wizard       the /setup wizard: panels, custom IDs, click handling
+internal/discord/ui           shared embed helpers: branding, escaping, limits
+tests/fakeha            in-memory Home Assistant used by unit tests
+tests/integration       tests against a real Home Assistant (build tag "integration")
 ```
 
-Dependency direction: `discord -> commands -> entities -> {auth, audit}`; `rest -> entities` (types only); `entities` depends on small interfaces (`HomeAssistant`, `Recorder`) that `rest` and `audit` satisfy. Discord-specific code lives only in `internal/discord` and `internal/discord/commands`; the rules about who may do what live in `entities` and know nothing about Discord.
+Dependency direction: `discord -> {commands, wizard} -> {setup, entities} -> {auth, audit}`; `rest -> entities` (types only); `entities` and `setup` depend on small interfaces (`HomeAssistant`, `StateSource`, `Recorder`) that `rest` and `audit` satisfy. Discord-specific code lives only in `internal/discord/...`; the rules about who may do what live in `entities` and `setup` and know nothing about Discord. The wizard holds no business rules: every transition, validation and write happens in `internal/setup`.
 
 ## Interaction lifecycle
 
@@ -25,7 +29,8 @@ Dependency direction: `discord -> commands -> entities -> {auth, audit}`; `rest 
 3. Commands are rate limited per user (6 per 10 seconds), then acknowledged immediately with a deferred ephemeral response (Discord requires an answer within 3 seconds; Home Assistant may be slower).
 4. `commands.Registry.Run` enforces the command's minimum level (user or admin), parses options, and calls `entities.Service`.
 5. The reply is delivered by editing the deferred response. Mentions are disabled on every message.
-6. Autocomplete requests follow the same authorization path and must answer within about 2.5 seconds; they read only the local allowlist, except administrator entity discovery, which has a 2 second Home Assistant timeout.
+6. Autocomplete requests follow the same authorization path and must answer within about 2.5 seconds; they read only the local allowlist and aliases, except administrator entity discovery, which uses the shared discovery snapshot (at most one Home Assistant fetch per 30 seconds) with a 2 second timeout.
+7. **Components and modals** (the setup wizard) take the same path: guild and user authorization first, then a separate per-user click limit (30 per 10 seconds). A click is acknowledged with a deferred message update and the message is edited afterwards. Opening a modal is the only immediate response, so it does only database work. The wizard parses the custom ID (session, rendered version, whitelisted action), loads the session from SQLite, and the setup service again requires administrator level and ownership (session user and guild) before doing anything. A stale version refreshes the panel instead of acting.
 
 ## Authorization layers
 
@@ -33,7 +38,8 @@ Dependency direction: `discord -> commands -> entities -> {auth, audit}`; `rest 
 | --- | --- | --- |
 | Guild | `auth.Authorizer` | Interaction must come from `DISCORD_GUILD_ID` (DMs rejected) |
 | User | `auth.Authorizer` | Admin list, or optional user list; everyone else rejected |
-| Command level | `commands.Registry`, `entities.Service` | `/permissions` and `/audit` need admin, checked in both places |
+| Command level | `commands.Registry`, `entities.Service` | `/permissions`, `/audit`, `/setup` and `/sync` need admin, checked in both places |
+| Setup session | `setup.Service` | Every wizard operation requires administrator level and a session that belongs to the caller in this guild; anything else looks like a missing session |
 | Entity | `entities.Permissions` | No row means no access, even for administrators |
 | Domain | `entities.Domain.Controllable`, `rest.allowedServices` | Only `light` and `switch` can be controlled; checked at grant time, at execution time, and again inside the REST client |
 
@@ -47,9 +53,12 @@ Migrations are embedded from `migrations/`, applied in order inside transactions
 | --- | --- |
 | `entity_permissions` | entity ID, `read`/`control`, who granted it, when |
 | `command_audit_logs` | control attempts and permission changes with outcome |
+| `entity_aliases` | canonical entity ID to alias, unique case-insensitively (v0.2.0) |
+| `setup_sessions` | persisted wizard sessions: JSON draft, step, status, version, expiry (v0.2.0) |
+| `known_entities` | minimal /sync registry: entity ID, domain, first/last seen, missing since (v0.2.0) |
 | `schema_migrations` | applied migrations and checksums |
 
-Each package owns the SQL for its own table. Timestamps are fixed-width UTC text so they sort chronologically. The database runs in WAL mode with foreign keys on and a 5 second busy timeout; the file is created with owner-only permissions. Tables for later milestones (aliases, subscriptions, rules, outbox, setup sessions) are added by those milestones' migrations, not before.
+Each package owns the SQL for its own table. Timestamps are fixed-width UTC text so they sort chronologically. The database runs in WAL mode with foreign keys on and a 5 second busy timeout; the file is created with owner-only permissions. Tables for later milestones (subscriptions, rules, outbox) are added by those milestones' migrations, not before. Migration 0002 only adds tables, so a v0.1.0 database upgrades in place with its permissions and audit log intact; the design notes are in [design/interactive-setup.md](design/interactive-setup.md).
 
 ## Failure handling
 
@@ -68,3 +77,14 @@ Each package owns the SQL for its own table. Timestamps are fixed-width UTC text
 - **Pure-Go SQLite (`modernc.org/sqlite`)** instead of CGO: a static binary, a distroless image, trivial cross-compilation.
 - **Standard library first:** configuration parsing, HTTP, logging, migrations and rate limiting use only the standard library. Runtime dependencies are discordgo and the SQLite driver.
 - **REST only in v0.1.0:** the WebSocket client arrives with real-time monitoring in v0.3.0.
+
+## Interactive setup (v0.2.0)
+
+The wizard is an explicit state machine (`internal/setup`): steps `health, discover, permissions, aliases, review, done`, events `next, back, confirm, cancel`, per-step guards, and draft operations that are only accepted at their own step. A session is a JSON draft (selected entities with desired access and alias, plus the base each was derived from) in `setup_sessions`, saved with a compare-and-swap on a `version` counter.
+
+- **Concurrency.** Two simultaneous clicks: one wins, the other gets a refreshed panel. One active session per administrator and guild (partial unique index); different administrators are independent.
+- **Replay and stale panels.** Component IDs carry the session version they were rendered for. The confirmation additionally applies only to the reviewed version, and applying marks the session completed in the same transaction as the writes, so a replay writes nothing.
+- **Atomic apply.** One transaction: verify the session, re-read the live configuration, detect changes made outside the session (per field), validate (grant rule, entity exists, alias uniqueness), write permissions and aliases, write audit entries, complete the session. Any failure rolls everything back. Home Assistant is queried before the transaction.
+- **Stale confirmations.** If an entity changed outside the session, apply writes nothing, rebases the draft onto the live state, bumps the version (killing the old confirmation) and sends the administrator back to review.
+- **Discovery and sync.** `entities.Discovery` keeps one immutable snapshot of compact items (30 second reuse; Refresh, `/sync` and apply always refetch). `/sync` additionally records entity IDs in `known_entities` to report new, removed and returned entities across restarts; names and states are never stored.
+- **Aliases.** Stored by canonical ID; resolution tries an entity ID first and only resolves an alias to an entity the caller already has the required access on.

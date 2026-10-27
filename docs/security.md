@@ -16,6 +16,10 @@ NeptHass sits between a chat platform and your home, so it is deny-by-default an
 | Mention abuse via device names | Friendly names are markdown-escaped and every message disables mentions |
 | Command flooding | Per-user rate limit (6 per 10 seconds); no unauthenticated work is tracked |
 | Silent privilege changes | Permission changes and control attempts (including denied ones) are audited |
+| Someone replays or forges a wizard click | Custom IDs are untrusted: shape and action are whitelisted, the session is loaded from SQLite and must belong to the caller and guild, the rendered version must match, and selections must be a subset of the IDs the server offered |
+| An outdated or replayed confirmation re-applies or restores a permission | Confirmation is bound to the reviewed session version; apply is a single transaction that completes the session; changes made outside the session abort apply, rebase the draft and require a fresh confirmation |
+| A non-administrator uses setup | Administrator level is required at the command, the bot routing and every setup service call; other users get a bare refusal that leaks nothing |
+| Alias abuse (mentions, markdown, impersonating an entity ID, probing for names) | Aliases are limited to letters, digits, spaces and `- ' . ( )`, 32 characters, unique, never entity-ID-shaped, escaped on output, and resolve only to entities the caller can already use |
 | Dangerous startup states | Invalid configuration aborts start; a rejected token aborts start; a newer or tampered database aborts start |
 
 ## What it does not protect against
@@ -36,10 +40,16 @@ NeptHass sits between a chat platform and your home, so it is deny-by-default an
 7. Restrict who can invite bots or change roles in your Discord server, and rotate the bot token if it may have leaked (Developer Portal, Reset Token).
 8. Update regularly (`git pull && docker compose up -d --build`) and watch the changelog.
 
+## Known limitations of the setup wizard
+
+- Alias uniqueness is case-insensitive but not confusable-aware: visually similar characters from different scripts count as different aliases.
+- Discord shows entity names and states to Discord; the wizard's ephemeral messages are private to the administrator but not end-to-end encrypted.
+- The wizard has been verified with simulated interactions and a real Home Assistant, but not against a live Discord connection yet.
+
 ## Reporting a vulnerability
 
 Follow [SECURITY.md](../SECURITY.md). Please do not open public issues for security problems.
 
 ## Security review status
 
-The v0.1.0 controls above are covered by automated tests (authorization matrix, domain allowlist, permission tampering, redaction, redirect handling). No independent external audit has been performed; a dedicated review is part of the v1.0.0 milestone.
+The controls above are covered by automated tests (authorization matrix, domain allowlist, permission tampering, redaction, redirect handling, and for v0.2.0 session ownership, replay and concurrency, stale confirmations, forged selections, rollback, alias rules and escaping). For v0.2.0, 16 deliberate regressions of these controls were injected one at a time and each was caught by the test suite. No independent external audit has been performed; a dedicated review is part of the v1.0.0 milestone.

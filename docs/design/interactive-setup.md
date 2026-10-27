@@ -1,6 +1,6 @@
 # v0.2.0 design: Interactive Setup
 
-Status: implemented on `feature/v0.2.0`. This document records the decisions the implementation follows; [architecture.md](../architecture.md) describes the resulting system.
+Status: implemented on `feature/v0.2.0` (not released). This document records the decisions the implementation follows; [architecture.md](../architecture.md) describes the resulting system.
 
 ## Goal
 
@@ -61,7 +61,7 @@ No foreign keys: permissions and aliases are intentionally independent of each o
 ## Security boundaries
 
 - Every interaction (command, component, modal, autocomplete) goes through the same guild and user authorization first; the setup service then requires administrator level again on every operation.
-- Custom IDs and select values are untrusted: the session is loaded from the database and must belong to the calling user and guild; selected values must be members of the page the server computes itself; entity IDs are re-validated.
+- Custom IDs and select values are untrusted: the session is loaded from the database and must belong to the calling user and guild; a submitted selection must be a subset of the exact IDs the server persisted as offered for that panel (`View.Offered`), so a forged value or a list that shifted in Home Assistant changes nothing; entity IDs are re-validated.
 - No credentials in setup: the wizard only accepts search text and aliases, and the session stores only IDs, aliases and view state.
 - All replies stay ephemeral and mentions are disabled. Aliases are character-restricted and escaped.
 - Component clicks have their own per-user rate limit (30 per 10 seconds), separate from slash commands.

@@ -52,9 +52,29 @@ Same as the `HA_TOKEN` error above, but Home Assistant started rejecting the tok
 
 The entity ID is misspelled or the entity was removed or renamed. Use the autocomplete suggestions of `/permissions allow`. A shared entity that disappeared from Home Assistant shows as "not found in Home Assistant" in `/devices`; remove it with `/permissions revoke`.
 
+## /setup problems
+
+**"This setup panel is out of date" / "That panel was out of date, so it was refreshed."** You clicked a button from an older copy of the panel (another window, or after another click changed the session). Nothing was changed; use the refreshed panel.
+
+**"Home Assistant is not reachable right now" inside the wizard.** The wizard never continues on stale data. Make sure Home Assistant is running, then press **Retry**. Your progress is saved.
+
+**"Setup expired".** A session expires after 24 hours without activity. Run `/setup` again.
+
+**"Setup already applied".** The confirmation was pressed twice (or replayed); the second one wrote nothing. Check `/devices`.
+
+**"These entities were changed outside this setup".** Someone changed the same entity (for example with `/permissions`) while you were reviewing. Nothing was applied. Review the updated differences and confirm again.
+
+**"You are not authorized to use NeptHass setup".** Only administrators (`DISCORD_ADMIN_USER_IDS`) can use the wizard, and only the administrator who started a session can use its buttons.
+
+**An entity is missing from the list.** Press **Refresh**, check the domain filter and the search words, and remember entities with IDs longer than 100 characters cannot be offered (the panel says how many). Use `/sync` to see what changed in Home Assistant.
+
+**Control is greyed out for an entity.** Only lights and switches can be controlled; everything else is read-only by design.
+
+**An alias is rejected.** Use letters, numbers, spaces and `- ' . ( )`, at most 32 characters, not shaped like an entity ID, and not already used (the message names the other entity).
+
 ## "You are sending commands too quickly"
 
-The limit is 6 commands per 10 seconds per user. Wait a few seconds.
+The limit is 6 commands per 10 seconds per user (setup wizard clicks have their own, more generous limit of 30 per 10 seconds). Wait a few seconds.
 
 ## A light did not change state
 
