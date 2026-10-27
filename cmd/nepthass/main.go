@@ -69,7 +69,7 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 
 	auditLog := audit.New(db)
 	service := entities.NewService(entities.Deps{
-		HA: ha, Permissions: entities.NewPermissions(db), Audit: auditLog, Logger: log, Now: time.Now,
+		HA: ha, Permissions: entities.NewPermissions(db), Aliases: entities.NewAliases(db), Audit: auditLog, Logger: log, Now: time.Now,
 	})
 	bot, err := discord.New(cfg.Discord, commands.Deps{
 		Entities: service, Audit: auditLog, HA: ha, DB: db, Version: version, Logger: log,

@@ -91,7 +91,7 @@ func (r *Registry) fail(req Request, err error) Reply {
 	case errors.Is(err, entities.ErrNotControllable):
 		msg = "NeptHass can only control lights and switches. Other kinds of entity are read-only."
 	case errors.Is(err, entities.ErrInvalidID):
-		msg = "That is not a valid entity ID (for example `light.kitchen`)."
+		msg = "That is not a valid entity ID (for example `light.kitchen`) or alias."
 	case errors.Is(err, entities.ErrInvalidAction), errors.Is(err, entities.ErrInvalidAccess):
 		msg = "That option value is not valid."
 	case errors.Is(err, rest.ErrNotFound):

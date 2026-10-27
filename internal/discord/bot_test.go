@@ -91,7 +91,7 @@ func newHarness(t *testing.T) *harness {
 	logger := slog.New(slog.DiscardHandler)
 	auditLog := audit.New(db)
 	perms := entities.NewPermissions(db)
-	svc := entities.NewService(entities.Deps{HA: client, Permissions: perms, Audit: auditLog, Logger: logger, Now: time.Now})
+	svc := entities.NewService(entities.Deps{HA: client, Permissions: perms, Aliases: entities.NewAliases(db), Audit: auditLog, Logger: logger, Now: time.Now})
 	bot, err := New(config.Discord{
 		Token: "discord-token-for-tests", GuildID: guildID, AdminUserIDs: []string{adminID}, AllowedUserIDs: []string{userID},
 	}, commands.Deps{Entities: svc, Audit: auditLog, HA: client, DB: db, Logger: logger, Version: "test"})

@@ -62,7 +62,7 @@ func openStack(t *testing.T, path string) stack {
 	ha := rest.New(config.HomeAssistant{URL: target.url, Token: config.Secret(target.token), Timeout: requestTimeout})
 	s := stack{db: db, ha: ha, perms: entities.NewPermissions(db), audit: audit.New(db)}
 	s.svc = entities.NewService(entities.Deps{
-		HA: ha, Permissions: s.perms, Audit: s.audit, Logger: slog.New(slog.DiscardHandler), Now: time.Now,
+		HA: ha, Permissions: s.perms, Aliases: entities.NewAliases(db), Audit: s.audit, Logger: slog.New(slog.DiscardHandler), Now: time.Now,
 	})
 	return s
 }
