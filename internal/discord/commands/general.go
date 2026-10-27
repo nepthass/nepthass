@@ -9,6 +9,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/nepthass/nepthass/internal/auth"
+	"github.com/nepthass/nepthass/internal/discord/ui"
 	"github.com/nepthass/nepthass/internal/homeassistant/rest"
 )
 
@@ -32,41 +33,55 @@ func (r *Registry) cmdHealth() command {
 	}
 }
 
-func (r *Registry) health(ctx context.Context, _ Request) Reply {
+// HealthReport is the result of probing every subsystem.
+type HealthReport struct {
+	Gateway   Gateway
+	HAVersion string
+	HAErr     error
+	DBErr     error
+}
+
+// OK reports whether every probed subsystem is healthy.
+func (h HealthReport) OK() bool { return h.Gateway.Connected && h.HAErr == nil && h.DBErr == nil }
+
+// Probe checks Discord, Home Assistant and the database with a timeout.
+func (r *Registry) Probe(ctx context.Context) HealthReport {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-	allOK := true
+	info, haErr := r.deps.HA.Info(ctx)
+	return HealthReport{Gateway: r.deps.Gateway(), HAVersion: info.Version, HAErr: haErr, DBErr: r.deps.DB.PingContext(ctx)}
+}
+
+func (r *Registry) health(ctx context.Context, _ Request) Reply {
+	rep := r.Probe(ctx)
 	check := func(err error, okText string) string {
 		if err == nil {
-			return iconOK + " " + okText
+			return ui.IconOK + " " + okText
 		}
-		allOK = false
-		return iconFail + " " + describeProbeError(err)
+		return ui.IconFail + " " + ProbeText(err)
 	}
-
-	gateway := r.deps.Gateway()
-	gatewayText := iconOK + fmt.Sprintf(" Connected (%d ms)", gateway.Latency.Milliseconds())
-	if !gateway.Connected {
-		allOK = false
-		gatewayText = iconFail + " Not connected"
+	gatewayText := ui.IconOK + fmt.Sprintf(" Connected (%d ms)", rep.Gateway.Latency.Milliseconds())
+	if !rep.Gateway.Connected {
+		gatewayText = ui.IconFail + " Not connected"
 	}
-	info, haErr := r.deps.HA.Info(ctx)
-	haText := check(haErr, "Connected (Home Assistant "+escape(info.Version)+")")
-	dbText := check(r.deps.DB.PingContext(ctx), "Database is responding")
-
-	color := colorOK
-	if !allOK {
-		color = colorWarn
+	color := ui.ColorOK
+	if !rep.OK() {
+		color = ui.ColorWarn
 	}
-	e := newEmbed("Health", "", color)
+	e := ui.Embed("Health", "", color)
 	e.Fields = []*discordgo.MessageEmbedField{
-		field("Discord gateway", gatewayText, false),
-		field("Home Assistant REST API", haText, false),
-		field("Home Assistant WebSocket", iconDisabled+" Not available in this release (planned for v0.3.0)", false),
-		field("Database", dbText, false),
+		ui.Field("Discord gateway", gatewayText, false),
+		ui.Field("Home Assistant REST API", check(rep.HAErr, "Connected (Home Assistant "+ui.Escape(rep.HAVersion)+")"), false),
+		ui.Field("Home Assistant WebSocket", ui.IconDisabled+" Not available in this release (planned for v0.3.0)", false),
+		ui.Field("Database", check(rep.DBErr, "Database is responding"), false),
 	}
 	e.Footer = &discordgo.MessageEmbedFooter{Text: "NeptHass " + r.deps.Version}
 	return Reply{Embeds: []*discordgo.MessageEmbed{e}}
+}
+
+// ProbeText describes a probe failure without leaking internal details.
+func ProbeText(err error) string {
+	return describeProbeError(err)
 }
 
 func describeProbeError(err error) string {
