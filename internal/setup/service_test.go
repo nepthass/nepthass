@@ -265,6 +265,22 @@ func TestNavigate_leavingHealthRequiresLiveHomeAssistantData(t *testing.T) {
 	}
 }
 
+func TestNavigate_leavingHealthNeverUsesAWarmCache_whenHomeAssistantIsDownNow(t *testing.T) {
+	e := newEnv(t)
+	e.seed("light.a")
+	ctx := context.Background()
+	sess := e.to(t, admin1, StepDiscover) // the discovery cache is now warm
+	back := must(t)(e.svc.Navigate(ctx, admin1, sess.ID, sess.Version, EventBack))
+	e.ha.err = errors.New("connection refused")
+
+	blocked, err := e.svc.Navigate(ctx, admin1, back.ID, back.Version, EventNext)
+
+	var haErr *HomeAssistantError
+	if !errors.As(err, &haErr) || blocked.Step != StepHealth {
+		t.Errorf("with Home Assistant down, leaving health must fail even with a warm cache: step=%s err=%v", blocked.Step, err)
+	}
+}
+
 func TestSelect_acceptsOnlyWhatTheServerOffered_andOfferedIsPersisted(t *testing.T) {
 	e := newEnv(t)
 	for i := range 25 {
