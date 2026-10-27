@@ -20,6 +20,7 @@ import (
 // Request is a parsed, already-authorized command invocation.
 type Request struct {
 	Actor      auth.Actor
+	GuildID    string
 	Command    string
 	Subcommand string
 	// Args holds option values by name. Integers are decimal strings.
@@ -30,8 +31,38 @@ type Request struct {
 
 // Reply is the message shown to the user (always ephemeral).
 type Reply struct {
-	Content string
-	Embeds  []*discordgo.MessageEmbed
+	Content    string
+	Embeds     []*discordgo.MessageEmbed
+	Components []discordgo.MessageComponent
+}
+
+// ModalInput is one text field of a modal.
+type ModalInput struct {
+	CustomID    string
+	Label       string
+	Placeholder string
+	Value       string
+	Required    bool
+	MaxLength   int
+}
+
+// Modal is a text-input dialog opened in response to a component click.
+type Modal struct {
+	CustomID string
+	Title    string
+	Inputs   []ModalInput
+}
+
+// ModalResult is the answer to a modal-opening click: the modal, or a notice to
+// show instead when the click is stale or not allowed.
+type ModalResult struct {
+	Modal  *Modal
+	Notice Reply
+}
+
+// SetupStarter starts or resumes the setup wizard (implemented by the wizard package).
+type SetupStarter interface {
+	Start(ctx context.Context, actor auth.Actor, guildID string) Reply
 }
 
 // Gateway describes the Discord connection for /ping and /health.
@@ -52,13 +83,15 @@ type Pinger interface {
 
 // Deps are the collaborators of the command set.
 type Deps struct {
-	Entities *entities.Service
-	Audit    *audit.Log
-	HA       HomeAssistant
-	DB       Pinger
-	Gateway  func() Gateway
-	Version  string
-	Logger   *slog.Logger
+	Entities  *entities.Service
+	Discovery *entities.Discovery
+	Setup     SetupStarter
+	Audit     *audit.Log
+	HA        HomeAssistant
+	DB        Pinger
+	Gateway   func() Gateway
+	Version   string
+	Logger    *slog.Logger
 }
 
 type (
@@ -84,7 +117,7 @@ type Registry struct {
 func New(d Deps) *Registry {
 	r := &Registry{deps: d, cmds: make(map[string]command)}
 	for _, c := range []command{
-		r.cmdPing(), r.cmdHealth(), r.cmdDevices(), r.cmdStatus(), r.cmdControl(), r.cmdPermissions(), r.cmdAudit(),
+		r.cmdPing(), r.cmdHealth(), r.cmdDevices(), r.cmdStatus(), r.cmdControl(), r.cmdPermissions(), r.cmdAudit(), r.cmdSetup(), r.cmdSync(),
 	} {
 		r.cmds[c.def.Name] = c
 		r.order = append(r.order, c.def.Name)

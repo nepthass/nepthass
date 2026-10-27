@@ -18,8 +18,8 @@ func (s *Service) Allow(ctx context.Context, actor auth.Actor, id ID, access Acc
 		if err := actor.Require(auth.LevelAdmin); err != nil {
 			return err
 		}
-		if access == AccessControl && !id.Domain().Controllable() {
-			return ErrNotControllable
+		if err := CheckGrant(id, access); err != nil {
+			return err
 		}
 		if _, err := s.d.HA.State(ctx, id); err != nil {
 			return err

@@ -139,3 +139,36 @@ func resetSimulation(t *testing.T) {
 		t.Fatalf("reset simulation: %v", err)
 	}
 }
+
+// unitSystem returns the instance's temperature unit ("°C" or "°F").
+func (a *haAdmin) temperatureUnit(ctx context.Context) (string, error) {
+	code, data, err := a.request(ctx, http.MethodGet, "/api/config", nil)
+	if err != nil {
+		return "", err
+	}
+	if code != http.StatusOK {
+		return "", fmt.Errorf("get config: HTTP %d", code)
+	}
+	var cfg struct {
+		UnitSystem struct {
+			Temperature string `json:"temperature"`
+		} `json:"unit_system"`
+	}
+	return cfg.UnitSystem.Temperature, json.Unmarshal(data, &cfg)
+}
+
+// requireMetricUnits fails fast, with the real cause, when the instance is not
+// metric. Home Assistant converts temperature sensors to the instance's unit
+// system, so a US customary instance reports 31.2 C as 88.16 F. The reset
+// script re-applies the metric system pinned in configuration.yaml; if that
+// did not take effect the expected values below cannot hold.
+func requireMetricUnits(ctx context.Context) error {
+	unit, err := target.admin.temperatureUnit(ctx)
+	if err != nil {
+		return fmt.Errorf("cannot read the unit system: %w", err)
+	}
+	if unit != "\u00b0C" {
+		return fmt.Errorf("Home Assistant uses %q for temperature, but the development simulation is metric; run script.nepthass_dev_scenario_reset or restart Home Assistant (see docs/development/troubleshooting.md)", unit)
+	}
+	return nil
+}

@@ -34,6 +34,8 @@ docker compose --env-file .env.dev -f compose.dev.yaml logs --tail=100 nepthass
 
 **I forgot the dev Home Assistant password.** Reset only Home Assistant's data and onboard again; you then need a new token for `.env.dev`.
 
+**Temperatures show `°F` (for example `70.7` instead of `21.5`) or the integration tests report a non-metric instance.** The onboarding UI switched the instance to US customary units and Home Assistant converts temperature sensors accordingly. Run the `NeptHass Dev: reset to baseline` script (it re-applies the metric system from `configuration.yaml`), or restart Home Assistant.
+
 **The `NeptHass Dev` dashboard is missing.** Hard-refresh the browser (Ctrl+Shift+R). It is a YAML dashboard defined in `configuration.yaml`; check the Home Assistant log for `lovelace` errors.
 
 ## NeptHass container

@@ -2,6 +2,7 @@ package entities_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -73,10 +74,12 @@ func (f *fakeHA) Control(_ context.Context, id entities.ID, action entities.Acti
 }
 
 type fixture struct {
-	svc   *entities.Service
-	perms *entities.Permissions
-	audit *audit.Log
-	ha    *fakeHA
+	svc     *entities.Service
+	perms   *entities.Permissions
+	aliases *entities.Aliases
+	audit   *audit.Log
+	ha      *fakeHA
+	db      *sql.DB
 }
 
 func newFixture(t *testing.T, ids ...entities.ID) fixture {
@@ -86,9 +89,9 @@ func newFixture(t *testing.T, ids ...entities.ID) fixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	f := fixture{perms: entities.NewPermissions(db), audit: audit.New(db), ha: newFakeHA(ids...)}
+	f := fixture{db: db, perms: entities.NewPermissions(db), aliases: entities.NewAliases(db), audit: audit.New(db), ha: newFakeHA(ids...)}
 	f.svc = entities.NewService(entities.Deps{
-		HA: f.ha, Permissions: f.perms, Audit: f.audit,
+		HA: f.ha, Permissions: f.perms, Aliases: f.aliases, Audit: f.audit,
 		Logger: slog.New(slog.DiscardHandler), Now: func() time.Time { return now },
 	})
 	return f
@@ -329,7 +332,7 @@ func TestSuggest_filtersByAccessAndQuery(t *testing.T) {
 	if err1 != nil || err2 != nil {
 		t.Fatal(err1, err2)
 	}
-	if len(control) != 1 || control[0] != "light.kitchen" || len(read) != 2 {
+	if len(control) != 1 || control[0].ID != "light.kitchen" || len(read) != 2 {
 		t.Errorf("control=%v read=%v", control, read)
 	}
 }
