@@ -62,26 +62,86 @@ func TestMonitoringText_everyConnectionStateHasAnAccurateMessage(t *testing.T) {
 	}
 }
 
+// retryGate replaces the monitor's backoff sleep (Config.Sleep, the documented
+// injection point) so a test, not a 2 ms timer, decides when the next dial may
+// start. Every Sleep call announces itself on entered and then blocks until the
+// test calls release or the monitor's context ends, so cleanup never hangs.
+type retryGate struct {
+	entered chan struct{}
+	proceed chan struct{}
+}
+
+func newRetryGate() *retryGate {
+	return &retryGate{entered: make(chan struct{}, 1), proceed: make(chan struct{})}
+}
+
+func (g *retryGate) sleep(ctx context.Context, _ time.Duration) error {
+	select {
+	case g.entered <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case <-g.proceed:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// awaitSleep returns once the monitor is parked in its backoff, after it has
+// published the failure and the retry time. Until release it cannot dial, so
+// its status is stable.
+func (g *retryGate) awaitSleep(t *testing.T) {
+	t.Helper()
+	select {
+	case <-g.entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the monitor never scheduled a retry")
+	}
+}
+
+func (g *retryGate) release(t *testing.T) {
+	t.Helper()
+	select {
+	case g.proceed <- struct{}{}:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no retry was waiting to be released")
+	}
+}
+
 // The same states, reached by a real monitor instead of a hand-built status.
+//
+// Two synchronization points keep it deterministic (it used to depend on timing):
+//   - the backoff is held (retryGate), so the monitor cannot move on to dialing
+//     between the moment a state is observed and the moment /health is read;
+//   - the held snapshot is released only after the fake server has received the
+//     get_states request, because a request that arrives after ReleaseStates
+//     would park on the next gate and never be answered.
 func TestHealth_followsARealMonitorThroughOutageReconnectionAndRecovery(t *testing.T) {
-	le := newLiveEnv(t, nil)
+	gate := newRetryGate()
+	le := newLiveEnv(t, func(c *monitor.Config) { c.Sleep = gate.sleep })
 	le.shareBoth(t)
 	le.srv.Down()
 	le.start()
 
+	gate.awaitSleep(t) // the first dial failed; the monitor is waiting out its backoff
 	le.wait(t, func(s monitor.Status) bool { return s.State == monitor.StateReconnecting && s.Reconnects >= 1 })
 	outage := le.run(user, "health", "", nil)
 
 	le.srv.Script(func(sc *fakeha.Script) { sc.HoldStates = true })
 	le.srv.Up()
+	gate.release(t) // now the retry may dial
+	le.awaitHeldSnapshot(t)
 	le.wait(t, func(s monitor.Status) bool { return s.State == monitor.StateSynchronizing && s.Reconnects >= 1 })
 	reconnecting := le.run(user, "health", "", nil)
 
-	le.srv.ReleaseStates()
+	le.srv.ReleaseStates() // safe: the server holds the request on the gate that this releases
 	le.wait(t, func(s monitor.Status) bool { return s.Healthy })
 	recovered := le.run(user, "health", "", nil)
 
 	le.srv.Down()
+	gate.awaitSleep(t) // the second outage is detected and the monitor is back in its backoff
 	le.wait(t, func(s monitor.Status) bool { return s.State == monitor.StateReconnecting && !s.Healthy })
 	secondOutage := le.run(user, "health", "", nil)
 
@@ -99,6 +159,18 @@ func TestHealth_followsARealMonitorThroughOutageReconnectionAndRecovery(t *testi
 	}
 	if strings.Contains(recovered, "Reconnecting") || strings.Contains(recovered, "Cannot reach") {
 		t.Errorf("a recovered monitor must not keep reporting the old failure:\n%s", recovered)
+	}
+}
+
+// awaitHeldSnapshot blocks until the fake server has received a get_states request
+// that it is holding (HoldStates). The fake counts the request and captures its
+// release gate under one lock, so after this returns ReleaseStates answers it.
+func (le *liveEnv) awaitHeldSnapshot(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := le.srv.WaitWS(ctx, func(s fakeha.WSStats) bool { return s.StateRequests >= 1 }); err != nil {
+		t.Fatalf("the server never received get_states: %v (%+v)", err, le.mon.Status())
 	}
 }
 
