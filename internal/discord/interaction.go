@@ -165,10 +165,26 @@ func newRequest(actor auth.Actor, guildID string, data discordgo.ApplicationComm
 		switch o.Type {
 		case discordgo.ApplicationCommandOptionString:
 			req.Args[o.Name] = o.StringValue()
-		case discordgo.ApplicationCommandOptionInteger:
-			req.Args[o.Name] = strconv.FormatInt(o.IntValue(), 10)
+		case discordgo.ApplicationCommandOptionInteger, discordgo.ApplicationCommandOptionNumber:
+			// A completed option is a number; the option being autocompleted carries
+			// the partial text as a string, which IntValue and FloatValue would panic on.
+			switch v := o.Value.(type) {
+			case float64:
+				req.Args[o.Name] = strconv.FormatFloat(v, 'f', -1, 64)
+			case string:
+				req.Args[o.Name] = v
+			default:
+				req.BadOptions = append(req.BadOptions, o.Name)
+			}
+		case discordgo.ApplicationCommandOptionChannel:
+			if id, ok := o.Value.(string); ok {
+				req.Args[o.Name] = id
+			} else {
+				req.BadOptions = append(req.BadOptions, o.Name)
+			}
 		default:
-			// No NeptHass command declares other option types.
+			// Never ignored: the registry refuses a request with an option it cannot parse.
+			req.BadOptions = append(req.BadOptions, o.Name)
 		}
 		if o.Focused {
 			req.Focused = o.Name

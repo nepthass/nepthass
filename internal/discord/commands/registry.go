@@ -27,6 +27,9 @@ type Request struct {
 	Args map[string]string
 	// Focused is the option being typed during autocomplete ("" otherwise).
 	Focused string
+	// BadOptions names options whose type NeptHass cannot parse. A request with
+	// any is refused rather than run with an option silently missing.
+	BadOptions []string
 }
 
 // Reply is the message shown to the user (always ephemeral).
@@ -88,12 +91,15 @@ type Deps struct {
 	Setup     SetupStarter
 	// Monitoring may be nil when live monitoring is not wired.
 	Monitoring Monitoring
-	Audit      *audit.Log
-	HA         HomeAssistant
-	DB         Pinger
-	Gateway    func() Gateway
-	Version    string
-	Logger     *slog.Logger
+	// Notifications may be nil: then /notifications is not registered and
+	// /health shows no notification line (v0.3.0 behaviour).
+	Notifications Notifications
+	Audit         *audit.Log
+	HA            HomeAssistant
+	DB            Pinger
+	Gateway       func() Gateway
+	Version       string
+	Logger        *slog.Logger
 }
 
 type (
@@ -124,6 +130,11 @@ func New(d Deps) *Registry {
 		r.cmds[c.def.Name] = c
 		r.order = append(r.order, c.def.Name)
 	}
+	if d.Notifications != nil {
+		c := r.cmdNotifications()
+		r.cmds[c.def.Name] = c
+		r.order = append(r.order, c.def.Name)
+	}
 	return r
 }
 
@@ -142,6 +153,10 @@ func (r *Registry) Run(ctx context.Context, req Request) Reply {
 	if !ok {
 		return Reply{Content: "Unknown command."}
 	}
+	if len(req.BadOptions) > 0 {
+		r.deps.Logger.Warn("refused a command with an option type NeptHass cannot parse", "command", req.Command, "options", req.BadOptions)
+		return Reply{Content: "This command contains an option that this version of NeptHass does not understand, so it was not run."}
+	}
 	if err := req.Actor.Require(c.min); err != nil {
 		return r.fail(req, err)
 	}
@@ -151,7 +166,7 @@ func (r *Registry) Run(ctx context.Context, req Request) Reply {
 // Complete returns autocomplete choices for the focused option.
 func (r *Registry) Complete(ctx context.Context, req Request) []*discordgo.ApplicationCommandOptionChoice {
 	c, ok := r.cmds[req.Command]
-	if !ok || c.complete == nil || req.Actor.Require(c.min) != nil {
+	if !ok || c.complete == nil || len(req.BadOptions) > 0 || req.Actor.Require(c.min) != nil {
 		return nil
 	}
 	return c.complete(ctx, req)

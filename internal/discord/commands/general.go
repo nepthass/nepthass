@@ -85,6 +85,9 @@ func (r *Registry) health(ctx context.Context, _ Request) Reply {
 		ui.Field("Home Assistant WebSocket (live monitoring)", MonitoringText(rep.Monitoring), false),
 		ui.Field("Database", check(rep.DBErr, "Database is responding"), false),
 	}
+	if n := r.deps.Notifications; n != nil {
+		e.Fields = append(e.Fields, ui.Field("Notifications", n.HealthLine(), false))
+	}
 	e.Footer = &discordgo.MessageEmbedFooter{Text: "NeptHass " + r.deps.Version}
 	return Reply{Embeds: []*discordgo.MessageEmbed{e}}
 }

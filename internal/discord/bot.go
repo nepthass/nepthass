@@ -78,6 +78,10 @@ func New(cfg config.Discord, deps commands.Deps, setupService *setup.Service) (*
 	return b, nil
 }
 
+// Session returns the Discord session, for components that only need REST (the
+// notification sender); the Bot still owns its gateway lifecycle.
+func (b *Bot) Session() *discordgo.Session { return b.session }
+
 func (b *Bot) gateway() commands.Gateway {
 	return commands.Gateway{Connected: b.ready.Load(), Latency: b.session.HeartbeatLatency()}
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/nepthass/nepthass/internal/homeassistant/rest"
 	"github.com/nepthass/nepthass/internal/logging"
 	"github.com/nepthass/nepthass/internal/monitor"
+	"github.com/nepthass/nepthass/internal/notify"
 	"github.com/nepthass/nepthass/internal/setup"
 	"github.com/nepthass/nepthass/internal/storage"
 )
@@ -78,21 +80,40 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 	setupService := setup.NewService(setup.Deps{
 		DB: db, Store: setup.NewStore(db), Discovery: discovery, Permissions: perms, Aliases: aliases, Audit: auditLog, Now: time.Now,
 	})
-	mon, err := monitor.New(monitor.Config{HomeAssistant: cfg.HomeAssistant, Logger: log})
+	hook := &changeHook{}
+	mon, err := monitor.New(monitor.Config{HomeAssistant: cfg.HomeAssistant, Logger: log, OnChange: hook.OnChange})
 	if err != nil {
 		return err
 	}
+	// Notifications: monitor.OnChange -> engine mailbox -> evaluator -> dispatcher ->
+	// Discord notifier. With no notification settings stored the engine is disabled
+	// and its callback returns immediately, so v0.3.0 behaviour is unchanged.
+	notifyStore := notify.NewStore(db)
+	notifySvc := notify.NewService(notify.Deps{GuildID: cfg.Discord.GuildID, DB: db, Store: notifyStore, Permissions: perms,
+		Sensors: mon.Tracker(), Audit: auditLog, Now: time.Now, Logger: log})
+	notifier := discord.NewNotifier(cfg.Discord.GuildID, notifyStore, log)
+	engine, err := notify.NewEngine(notify.EngineDeps{Store: notifyStore, GuildID: cfg.Discord.GuildID, Access: perms, Sensors: mon.Tracker(),
+		Aliases: aliases, Status: mon, Sender: notifier, Logger: log})
+	if err != nil {
+		return err
+	}
+	hook.set(engine.OnChange)
+	admin := discord.NewNotificationAdmin(notifySvc, engine, notifier, mon.Tracker(), aliases, log)
 	bot, err := discord.New(cfg.Discord, commands.Deps{
-		Entities: service, Discovery: discovery, Monitoring: monitor.NewReader(mon, perms, aliases),
+		Entities: service, Discovery: discovery, Monitoring: monitor.NewReader(mon, perms, aliases), Notifications: admin,
 		Audit: auditLog, HA: ha, DB: db, Version: version, Logger: log,
 	}, setupService)
 	if err != nil {
 		return err
 	}
 
+	notifier.Bind(bot.Session())
+	if err := engine.Reload(ctx); err != nil {
+		log.Warn("notification settings could not be loaded; notifications stay disabled", "error", err)
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	var background sync.WaitGroup
-	background.Add(2)
+	background.Add(3)
 	go func() {
 		defer background.Done()
 		auditLog.RunRetention(ctx, cfg.Database.AuditRetention, log)
@@ -102,6 +123,12 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 	go func() {
 		defer background.Done()
 		mon.Run(ctx)
+	}()
+	// The notification engine stops with ctx; Run returns after a drain bounded to
+	// three seconds, so shutdown waits for it below like for the monitor.
+	go func() {
+		defer background.Done()
+		engine.Run(ctx)
 	}()
 	err = bot.Run(ctx)
 	cancel()
@@ -124,4 +151,20 @@ func checkHomeAssistant(ctx context.Context, ha *rest.Client, log *slog.Logger) 
 		log.Info("authenticated with home assistant", "version", info.Version)
 	}
 	return nil
+}
+
+// changeHook lets the monitor be built before the notification engine: the
+// engine needs the monitor's tracker and status, and the monitor needs the
+// engine's callback. Until set it drops changes, which cannot matter because
+// the monitor has not started.
+type changeHook struct {
+	fn atomic.Pointer[func(monitor.Change)]
+}
+
+func (h *changeHook) set(f func(monitor.Change)) { h.fn.Store(&f) }
+
+func (h *changeHook) OnChange(c monitor.Change) {
+	if f := h.fn.Load(); f != nil {
+		(*f)(c)
+	}
 }
