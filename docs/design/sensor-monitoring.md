@@ -1,6 +1,6 @@
 # v0.3.0 design: Sensor Monitoring
 
-Status: implemented on `feature/v0.3.0` (unreleased; the maintainer's manual QA is recorded in [../development/smoke-tests.md](../development/smoke-tests.md), with a few checks outstanding). This document records the decisions the implementation follows; [../architecture.md](../architecture.md) describes the resulting system.
+Status: implemented and released in v0.3.0. This document records the decisions the implementation follows; [../architecture.md](../architecture.md) describes the resulting system.
 
 ## Goals
 

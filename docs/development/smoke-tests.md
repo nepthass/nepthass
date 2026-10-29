@@ -178,7 +178,7 @@ Use the dev stack with the `app` profile rebuilt from the v0.2.0 code (`up -d --
 
 Use the dev stack with the `app` profile rebuilt from the v0.3.0 code (`up -d --build`), the simulation at baseline, and the seven virtual sensors shared (run `/setup` or `/permissions allow`; keep the light and switch shared too so the existing commands can be re-checked). The NeptHass log should show `home assistant websocket authenticated`, `home assistant event subscription active` and `home assistant initial synchronization completed`. Monitoring never sends a message by itself: you only see its effects through `/health` and `/sensors`. Rows marked (optional) need container or network control.
 
-Manual results for this group were recorded on 2026-10-29 (section 4, user-reported). Still outstanding after that run: L06, L13, L14, the remaining L17 commands (`/permissions`, `/audit`, `/setup` step 1 and `/control` off) and a manual capture of the L16 pre-synchronization message.
+Manual results for this group were recorded on 2026-10-29 (section 4, user-reported). Still outstanding after that run: L06, L13, L14, the remaining L17 commands (`/audit` and `/setup` step 1) and a manual capture of the L16 pre-synchronization message.
 
 | # | Step | Expected |
 | --- | --- | --- |
@@ -293,7 +293,7 @@ These were produced by commands run against the release tree, never by a person 
 | L17 existing commands | **Partly** | see below |
 | L18 log hygiene | User-reported pass for the logs inspected | successful WebSocket authentication and event subscription; initial synchronization of seven sensors; exponential reconnect delays during the outage; successful reconnection and resynchronization; clean shutdown and restart; no visible credentials, panic or fatal errors. Not an exhaustive log review |
 
-**L17 evidence.** `/ping`, `/devices`, `/status` and `/control` passed. `/devices` showed five shared entities with read and control levels. `/control` turned `light.nepthass_dev_light` from `off` to `on`, and a later `/status` independently confirmed `State: on` and the alias `Living Room Light`. `/sync` (a group G command, not named in the L17 row) discovered 43 Home Assistant entities, reported zero new and zero removed, and stated that nothing was shared or changed. **Still pending in L17:** `/permissions`, `/audit`, `/setup` step 1 (the monitoring line in the wizard's health step) and the `off` direction of `/control`.
+**L17 evidence.** `/ping`, `/devices`, `/status` and `/control` passed. `/devices` showed five shared entities with read and control levels. `/control` turned `light.nepthass_dev_light` from `off` to `on`, and a later `/status` independently confirmed `State: on` and the alias `Living Room Light`. `/sync` (a group G command, not named in the L17 row) discovered 43 Home Assistant entities, reported zero new and zero removed, and stated that nothing was shared or changed. **Reported afterwards:** the owner also confirmed `/control` off and `/permissions list` (user-reported). **Still pending in L17:** `/audit` and `/setup` step 1 (the monitoring line in the wizard's health step).
 
 **Outstanding manual coverage.** L06, L13 and L14; the pending parts of L17; and a manual capture of the L16 pre-synchronization message. Automated tests cover the underlying behavior of each of these (see section 1 and the results below), but an automated test is not a manual pass, and none of them is recorded as one.
 

@@ -6,7 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-Third milestone (implemented on `feature/v0.3.0` and under review in a pull request, not released): real-time sensor monitoring. Notifications are not part of it.
+## [0.3.0] - 2026-10-29
+
+Third milestone: real-time sensor monitoring. Notifications are not part of it.
 
 ### Added
 
@@ -53,7 +55,6 @@ Third milestone (implemented on `feature/v0.3.0` and under review in a pull requ
 - Live state is in memory: after a restart `/sensors` is empty or stale until the first synchronization completes (seconds).
 - A Home Assistant instance whose `get_states` answer exceeds 16 MiB cannot synchronize.
 - Whether a given third-party integration ever sends a state update without `device_class` cannot be settled without that integration; the tracker keeps the previous kind only for unavailable or unknown states, and stops tracking a real value that has no class.
-- Manual Discord QA of v0.3.0 was performed by the maintainer on 2026-10-29 and is recorded as user-reported in `docs/development/smoke-tests.md` (section 4). Still outstanding: the all-sensors-offline check (L06), the invalid-token (L13) and network-drop (L14) scenarios, the `/permissions`, `/audit` and `/setup` parts of the existing-command check (L17), and a manual capture of the pre-synchronization `/sensors` message (automated tests cover it).
 
 ## [0.2.0] - 2026-10-27
 
@@ -116,6 +117,7 @@ First milestone: the foundation.
 - A single Discord guild is supported.
 - `/devices` lists 10 entities per page via a `page` option; interactive pagination arrives with the dashboard.
 
-[Unreleased]: https://github.com/nepthass/nepthass/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/nepthass/nepthass/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/nepthass/nepthass/releases/tag/v0.1.0
+[Unreleased]: https://github.com/nepthass/nepthass/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/nepthass/nepthass/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/nepthass/nepthass/compare/a7fbdd97a3651874960dd5c08f17c5c65dca1e59...v0.2.0
+[0.1.0]: https://github.com/nepthass/nepthass/commit/a7fbdd97a3651874960dd5c08f17c5c65dca1e59
