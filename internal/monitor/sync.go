@@ -37,12 +37,17 @@ func (s *syncSink) handle(_ int64, event json.RawMessage) {
 		return
 	}
 	s.mu.Unlock()
-	s.m.process(event)
+	s.m.process(event, SourceLive)
 }
 
 // synchronize applies the authoritative snapshot, then replays the events that
 // arrived while it was being fetched, then goes live. Buffered events older
 // than the snapshot are dropped by the ordering rule; newer ones are applied.
+// synchronize reconciles the snapshot and then replays the events buffered while
+// it was fetched, all under sink.mu: live events cannot be processed (the reader
+// goroutine waits in handle) until it returns, which is what orders snapshot
+// changes before replay changes before live changes. Config.OnChange runs inside
+// this window, with sink.mu held and the tracker lock not held.
 func (m *Monitor) synchronize(sink *syncSink, raw json.RawMessage) (Reconciled, error) {
 	snapshot, err := m.parseSnapshot(raw)
 	if err != nil {
@@ -54,9 +59,19 @@ func (m *Monitor) synchronize(sink *syncSink, raw json.RawMessage) (Reconciled, 
 		m.dropped.Add(1)
 		return Reconciled{}, fmt.Errorf("%w (more than %d events)", errSyncOverflow, sink.max)
 	}
-	summary := m.tracker.Reconcile(snapshot, m.now())
-	for _, ev := range sink.buf {
-		m.process(ev)
+	now := m.now()
+	var summary Reconciled
+	if m.cfg.OnChange == nil {
+		summary = m.tracker.Reconcile(snapshot, now)
+	} else {
+		var changes []Change
+		summary, changes = m.tracker.reconcileChanges(snapshot, now)
+		for _, c := range changes { // snapshot changes first, in Seq order...
+			m.emit(c)
+		}
+	}
+	for _, ev := range sink.buf { // ...then the events that arrived meanwhile
+		m.process(ev, SourceReplay)
 	}
 	sink.buf, sink.live = nil, true
 	return summary, nil

@@ -48,6 +48,20 @@ type Config struct {
 	Liveness time.Duration
 	// Dial replaces ws.Dial (tests).
 	Dial func(context.Context, ws.Options) (*ws.Session, error)
+	// OnChange, when set, receives every Change the tracker accepts, in order
+	// (see Change for the ordering contract). It is nil by default and then the
+	// monitor behaves exactly as without it.
+	//
+	// The callback runs synchronously on a goroutine that is in the middle of the
+	// monitor's hot path: the WebSocket reader goroutine for live events, and the
+	// monitor goroutine while a snapshot is reconciled and buffered events are
+	// replayed. During that replay the synchronization lock (syncSink.mu) is held,
+	// and the WebSocket reader waits on it; the tracker lock is never held. So the
+	// callback MUST be constant-time and non-blocking and MUST NOT perform I/O
+	// (no database, network, channel send that can block, or sleeping). It may read
+	// the Tracker (Get, All, Len); it must not call Monitor.Run. A panic is
+	// recovered, counted (HookPanics) and logged, and the monitor carries on.
+	OnChange func(Change)
 }
 
 // Monitor owns the WebSocket connection to Home Assistant, its lifecycle and
@@ -70,6 +84,7 @@ type Monitor struct {
 	invalid        atomic.Uint64
 	dropped        atomic.Uint64
 	unexpectedPast atomic.Uint64
+	hookPanics     atomic.Uint64
 }
 
 // New validates the configuration and returns a Monitor that has not started.
@@ -246,9 +261,10 @@ func (m *Monitor) command(ctx context.Context, sess *ws.Session, timeout time.Du
 	return res, err
 }
 
-// process validates and applies one state_changed event. It runs on the
-// session's reader goroutine and does only O(1) work under the tracker lock.
-func (m *Monitor) process(raw json.RawMessage) {
+// process validates and applies one state_changed event. It does only O(1)
+// work under the tracker lock. src says which path delivered it: SourceLive on the
+// session's reader goroutine, SourceReplay on the monitor goroutine.
+func (m *Monitor) process(raw json.RawMessage, src ChangeSource) {
 	u, err := ParseEvent(raw)
 	switch {
 	case errors.Is(err, errIgnored):
@@ -258,9 +274,34 @@ func (m *Monitor) process(raw json.RawMessage) {
 		return
 	}
 	now := m.now()
-	m.tracker.Apply(u, now)
+	if m.cfg.OnChange == nil {
+		m.tracker.Apply(u, now)
+	} else if _, ch, ok := m.tracker.applyChange(src, u, now); ok {
+		m.emit(ch) // the tracker lock was released when applyChange returned
+	}
 	m.mach.update(func(x *machine) { x.lastEvent = now })
 }
+
+// emit hands one Change to Config.OnChange, synchronously and in order. A panic
+// in the callback is recovered so it can neither stop the reader goroutine nor
+// leave synchronization half done; later changes are still delivered.
+func (m *Monitor) emit(c Change) {
+	defer func() {
+		if r := recover(); r != nil {
+			m.hookPanics.Add(1)
+			text := fmt.Sprint(r)
+			if len(text) > 200 {
+				text = text[:200]
+			}
+			m.log.Error("monitoring change callback panicked; the monitor keeps running", "panic", text)
+		}
+	}()
+	m.cfg.OnChange(c)
+}
+
+// HookPanics counts panics recovered from Config.OnChange (zero when it is unset
+// or well behaved).
+func (m *Monitor) HookPanics() uint64 { return m.hookPanics.Load() }
 
 // Status returns a consistent copy of the monitor's health.
 func (m *Monitor) Status() Status {
