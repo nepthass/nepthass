@@ -234,6 +234,15 @@ func (e *Engine) evaluate(ctx context.Context) {
 			e.markResync(id)
 		}
 	}
+	// A snapshot after a reconnect usually means monitoring just recovered. Take a
+	// health sample NOW, before producing the late alerts it explains, so a pending
+	// recovery notice is queued ahead of them instead of up to a tick later.
+	for _, s := range slots {
+		if s.anySnapshot {
+			e.sampleHealth()
+			break
+		}
+	}
 	for _, id := range order {
 		e.evaluateSlot(ctx, rs, id, slots[id])
 	}
@@ -456,16 +465,8 @@ func (e *Engine) maybeDigest(ctx context.Context, rs *ruleSet) {
 // with no state transition to wake a waiter.
 func (e *Engine) runWatcher(ctx context.Context) {
 	for {
-		st := e.d.Status.Status()
-		now := e.clock.Now()
-		switch {
-		case st.State == monitor.StateStopped:
-			e.down.shutdown() // the monitor was stopped on purpose: never an outage
+		if e.sampleHealth() {
 			return
-		case !e.active.Load():
-			e.down.reset(now) // notifications are off: no episode accumulates
-		default:
-			e.handleDown(e.down.step(now, st.Healthy, !e.disp.br.isOpen()), st, now)
 		}
 		e.kickEvaluator() // lets a pending digest run when the queue has drained
 		timer := e.clock.After(e.cfg.HealthTick)
@@ -479,6 +480,24 @@ func (e *Engine) runWatcher(ctx context.Context) {
 			return
 		}
 	}
+}
+
+// sampleHealth takes one monitoring-health observation and applies the
+// monitoring-down machine. It returns true when the monitor was stopped on
+// purpose and sampling should end. It is safe to call from the evaluator too.
+func (e *Engine) sampleHealth() (stop bool) {
+	st := e.d.Status.Status()
+	now := e.clock.Now()
+	switch {
+	case st.State == monitor.StateStopped:
+		e.down.shutdown() // the monitor was stopped on purpose: never an outage
+		return true
+	case !e.active.Load():
+		e.down.reset(now) // notifications are off: no episode accumulates
+	default:
+		e.handleDown(e.down.step(now, st.Healthy, !e.disp.br.isOpen()), st, now)
+	}
+	return false
 }
 
 func (e *Engine) handleDown(act downAction, st monitor.Status, now time.Time) {

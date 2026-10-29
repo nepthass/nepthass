@@ -908,3 +908,41 @@ func TestEngine_aDownAlertDeliveredAfterRecoveryStillGetsItsRecoveryNotice(t *te
 		t.Errorf("the channel must not be left saying monitoring is down: %v", kinds)
 	}
 }
+
+func TestEngine_aRecoveryNoticeIsQueuedAheadOfTheLateSnapshotAlertsItExplains(t *testing.T) {
+	e := newEF(t, nil)
+	e.configure()
+	e.addRule("binary_sensor.leak", monitor.CategoryLeak, KindState, nil, dur(0))
+	e.addRule(door, monitor.CategoryDoor, KindState, nil, dur(0))
+
+	// An outage whose down alert was DELIVERED.
+	st := monitor.Status{State: monitor.StateReady}
+	now := e.clk.Now()
+	e.eng.handleDown(e.eng.down.step(now, false, true), st, now)
+	now = now.Add(5 * time.Minute)
+	e.clk.Advance(5 * time.Minute)
+	e.eng.handleDown(e.eng.down.step(now, false, true), st, now)
+	e.flush()
+	if len(e.sent()) != 1 || e.sent()[0].Kind != MsgMonitoringDown {
+		t.Fatalf("the down alert was delivered: %+v", e.sent())
+	}
+
+	// Monitoring recovers and the reconnect snapshot reveals two late transitions.
+	e.stat.set(true, monitor.StateReady)
+	e.emit(e.change("binary_sensor.leak", monitor.CategoryLeak, "off", "on", monitor.SourceSnapshot),
+		e.change(door, monitor.CategoryDoor, "off", "on", monitor.SourceSnapshot))
+	e.eval() // one pass: it must sample health before it produces the late alerts
+	e.flush()
+
+	var kinds []string
+	for _, m := range e.sent()[1:] {
+		label := map[MessageKind]string{MsgMonitoringRecovered: "recovered", MsgAlert: "alert"}[m.Kind]
+		if m.Kind == MsgAlert && m.Late {
+			label = "late-" + string(m.Category)
+		}
+		kinds = append(kinds, label)
+	}
+	if fmt.Sprint(kinds) != "[recovered late-leak late-door]" {
+		t.Errorf("recovery first, then the late alerts (critical lane first, then normal): %v", kinds)
+	}
+}
