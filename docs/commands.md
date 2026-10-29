@@ -64,7 +64,7 @@ Supported kinds: temperature, humidity, battery level and battery low, motion, d
 
 ## /setup
 
-Opens the setup wizard (administrators only). The wizard is private to you and resumes where you left off. See [setup.md](setup.md#configure-access-with-setup) for a walkthrough.
+Opens the setup wizard (administrators only). The wizard is private to you and resumes where you left off. See [setup.md](setup.md#5-configure-access-with-setup) for a walkthrough.
 
 | Step | What you do |
 | --- | --- |
