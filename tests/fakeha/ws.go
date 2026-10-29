@@ -142,6 +142,7 @@ func (s *Server) Down() {
 	conns := s.connsLocked()
 	s.ws.mu.Unlock()
 	for _, c := range conns {
+		s.unregister(c)
 		_ = c.c.Close()
 	}
 }
@@ -161,6 +162,7 @@ func (s *Server) DisconnectAll(clean bool) {
 	conns := s.connsLocked()
 	s.ws.mu.Unlock()
 	for _, c := range conns {
+		s.unregister(c) // before any byte reaches the client
 		if clean {
 			c.wmu.Lock()
 			_ = c.c.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseGoingAway, ""), time.Now().Add(time.Second))
@@ -282,7 +284,16 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) dropConn(c *wsConn) {
+	s.unregister(c)
 	_ = c.c.Close()
+}
+
+// unregister removes a connection from the server's accounting (idempotent).
+// Server-side closes call it BEFORE the socket is closed: a client that
+// reconnects at once must never be counted next to the connection that was just
+// dropped. Without that, the counters briefly showed two subscriptions on a slow
+// machine although the old socket was already closed.
+func (s *Server) unregister(c *wsConn) {
 	s.ws.mu.Lock()
 	defer s.ws.mu.Unlock()
 	if _, ok := s.ws.conns[c]; !ok {
