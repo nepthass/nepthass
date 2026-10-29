@@ -26,6 +26,14 @@ Third milestone (in development on `feature/v0.3.0`, not released): real-time se
 - `/health` no longer says the WebSocket is "not available in this release".
 - The repository moved from a personal account to the `nepthass` GitHub organization (`github.com/nepthass/nepthass`). Clone URLs, the changelog compare links and the image source label now point there. The Go module path was already `github.com/nepthass/nepthass` and is unchanged. Published release notes and history keep the earlier URLs, which GitHub redirects.
 
+### Fixed
+
+- `/sensors` no longer answers "No monitored sensors are shared with you" before the first synchronization (right after a restart, or while Home Assistant is unreachable at startup). It now says that readings are not available yet, with the reason, and nothing about what is shared. The real empty state is kept for a synchronized monitor.
+- `/health` no longer calls a reconnection "Starting": after an earlier failure the stages read "Reconnecting", with the previous failure category. The next retry time is an absolute clock time instead of a relative Discord timestamp that turned into "seconds ago".
+- The `/sensors` footer says "Live readings" only while monitoring is healthy and synchronized, and "Last known values, not live" otherwise.
+- `subscribe_events` and `get_states` are bounded by timeouts (15 s and 60 s). A peer that answered pings but never answered one of them used to leave the monitor waiting forever; the attempt now ends and the normal backoff takes over.
+- A tracked sensor that reports `unavailable` or `unknown` with no `device_class` attribute keeps its previous kind instead of disappearing from `/sensors`.
+
 ### Security
 
 - Monitored data reaches users only through a `Reader` that checks the caller's level and the entity's *current* permission on every read (deny by default; an unshared entity is indistinguishable from an unknown one; revocation is immediate even for cached data).
@@ -44,6 +52,7 @@ Third milestone (in development on `feature/v0.3.0`, not released): real-time se
 - A change that happens and reverses while NeptHass is disconnected cannot be seen; Home Assistant does not replay events and NeptHass does not invent them.
 - Live state is in memory: after a restart `/sensors` is empty or stale until the first synchronization completes (seconds).
 - A Home Assistant instance whose `get_states` answer exceeds 16 MiB cannot synchronize.
+- Whether a given third-party integration ever sends a state update without `device_class` cannot be settled without that integration; the tracker keeps the previous kind only for unavailable or unknown states, and stops tracking a real value that has no class.
 - Manual Discord acceptance of v0.3.0 has not been performed; see `docs/development/smoke-tests.md` group H.
 
 ## [0.2.0] - 2026-10-27

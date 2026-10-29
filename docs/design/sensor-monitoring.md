@@ -57,6 +57,13 @@ The access token is sent exactly once, in the `auth` message, and is never logge
 
 A TCP or WebSocket connection alone is never reported as healthy. After a disconnect every layer drops to false at once, and cached values are labeled stale.
 
+## What users see while monitoring is not live
+
+- **First start** is "Starting (stage)". **After any earlier failure** the same stages read "Reconnecting (stage)", and a dial attempt reads "Reconnecting to Home Assistant's WebSocket (the previous attempt failed: ...)". A reconnection is never called Starting.
+- **Waiting to retry** shows the failure and an absolute clock time ("next attempt at 12:34:56"). A relative Discord timestamp is deliberately not used for a *future* moment: Discord recomputes it live, so "in 24 seconds" turns into "24 seconds ago" while the message is still on screen.
+- **`/sensors` before the first synchronization** does not claim that nothing is shared. The cache is empty only because nothing has been loaded, so it says that readings are not available yet, with the reason (still starting, cannot reach Home Assistant, token rejected, not running), and nothing about what is shared. The answer is identical whether or not anything is shared, so it reveals nothing about permissions. After a synchronization an empty list means no monitored sensor is shared, and the old wording applies.
+- **The `/sensors` footer** says "Live readings" only while monitoring is healthy and synchronized, and "Last known values, not live" otherwise. The banner and the footer use one definition of live.
+
 ## Connection state machine
 
 ```mermaid
@@ -176,7 +183,7 @@ Home Assistant metadata is untrusted: only `entity_id`, `state`, `last_changed`,
 
 **Ordering and duplicates.** Home Assistant gives every state object `last_updated` (and `last_changed`, which only moves when the state value changes). Per entity the tracker applies an update only if `last_updated` is newer than the stored one. An identical update (same `last_updated` and fields) is a *duplicate*; an older one is *stale* (both counted and dropped); a newer one with the same raw state but different attributes is an *attribute-only* update (metadata and `last_updated` move, `last_changed` does not, and `ValueChanged` is false). Delivery is not assumed exactly-once or in order. Each accepted update increments a per-sensor `Revision`.
 
-**Removal and reappearance.** `new_state: null` removes the entity, but only if the event's `old_state.last_updated` is not older than the stored state. A later event for the same entity adds it back as a new entry. A device class that stops classifying removes the entry.
+**Removal and reappearance.** `new_state: null` removes the entity, but only if the event's `old_state.last_updated` is not older than the stored state. A later event for the same entity adds it back as a new entry. A device class that stops classifying removes the entry, with one exception: a tracked sensor that reports `unavailable` or `unknown` and carries **no** `device_class` attribute at all keeps the category, class, unit and name it already had, in live updates and in snapshot reconciliation. Home Assistant normally keeps `device_class` on an unavailable entity (its entity code writes it outside the availability branch, and the placeholder state it writes for registry entities includes the registry's class), so this only matters when an update omits it, for example a placeholder whose registry entry never recorded one. Dropping the sensor would make it vanish from `/sensors` instead of showing "unavailable"; retaining it is safe because its meaning comes from the raw state (not-reporting, never closed, clear or dry). A real value without a class cannot be interpreted and still stops the tracking, an explicit different class always wins, and a sensor never seen with a class is not invented. What cannot be settled without a real integration: whether a particular third-party integration ever sends such an update, and how Home Assistant versions older than the one the source was read from behave.
 
 **Freshness.** The cache carries the time each sensor was observed, and a monitor-wide health flag. When the connection is down or silent, readers still get the last known values but they are marked **stale**; Discord output says so. A value is never presented as current without a healthy connection.
 
@@ -192,6 +199,8 @@ Failures are classified:
 | Shutdown | context canceled | no retry |
 
 Backoff resets only after a session stayed `Ready` for a stability window (30 s by default), so a server that accepts and immediately drops us keeps growing the delay instead of causing a reconnect storm. Waits are cancellation-aware. The random source and the clock are injected for deterministic tests.
+
+**Command timeouts.** A connection that keeps answering pings but never answers a command would otherwise leave the monitor in `subscribing` or `synchronizing` forever, because pings keep the read deadline and the ping timeout satisfied. `subscribe_events` therefore waits at most 15 s and `get_states` at most 60 s (`Config.CommandTimeout` and `Config.SnapshotTimeout`). A timeout ends the attempt with an error wrapping `context.DeadlineExceeded`, which is classified as a network failure and handled by the normal backoff; the session is closed and joined before the next dial, so subscriptions never stack. Shutdown while waiting returns immediately and is not counted as a failure.
 
 ## Reconciliation
 
@@ -255,6 +264,9 @@ Structured logs through the existing scrubbing logger: connection established, a
 | Home Assistant restarts | server close then refused connections | backoff until up; authoritative snapshot replaces cache | Reconnecting then Healthy | `TestFailure_homeAssistantRestart_neverDuplicatesTheSubscription`; real Home Assistant: `TestMonitor_reconnectsAfterANetworkOutage_andReconcilesChangesItNeverSaw`; a real container restart was also observed once with a temporary probe that is not part of the suite (see [smoke-tests.md](../development/smoke-tests.md), L12) |
 | Network connection drops | same as above | same | Reconnecting (network) | `TestFailure_dropDuringMonitoring_marksValuesStaleThenReconcilesWhatChangedMeanwhile`; real Home Assistant behind a TCP proxy: `TestMonitor_reconnectsAfterANetworkOutage_andReconcilesChangesItNeverSaw` |
 | Invalid token | `auth_invalid`, no hot loop | slow retry (30 s up to 10 min) | Failed (authentication), "update HA_TOKEN" | `TestFailure_invalidToken_usesTheSlowScheduleAndNeverBusyLoops` |
+| Peer answers pings but never answers `subscribe_events` or `get_states` | the command times out (15 s and 60 s by default), the session is closed | normal backoff, a fresh session and snapshot; never two subscriptions | Reconnecting (network) | `TestFailure_subscribeNeverAnswered_whilePingsAreAnswered_timesOutAndReconnects`, `TestFailure_snapshotNeverAnswered_whilePingsAreAnswered_timesOutReconnectsAndNeverDuplicatesSubscriptions`, `TestFailure_shutdownWhileWaitingForACommand_isImmediate_andNotAFailure` |
+| Cache not yet synchronized when `/sensors` is called | says readings are not available yet, with the reason, and nothing about what is shared | none needed; the real list appears after the first synchronization | Starting or Reconnecting | `TestSensors_beforeTheFirstSynchronization_neverClaimNothingIsShared`, `TestSensors_beforeTheFirstSynchronization_revealsNothingAboutPermissions` |
+| A tracked sensor reports `unavailable` with no `device_class` | stays tracked with its previous class and shows as not reporting | normal recovery on the next real update | `/sensors` shows "unavailable (not reporting)" | `TestTracker_aSensorThatBecomesUnavailableWithoutADeviceClassKeepsItsClass_andIsNeverShownAsSafe`, `TestSensors_aSensorThatLosesItsDeviceClassWhileUnavailableIsListedAsNotReporting` |
 | Invalid JSON | protocol failure, session closed | backoff, reconnect | Reconnecting (protocol) | `TestFailure_malformedJSON_dropsTheConnectionAndRecovers` |
 | Oversized message | read limit ends the session | backoff, reconnect | Reconnecting (protocol) | `TestFailure_oversizedMessage_failsTheSyncAndRecoversWhenItShrinks` |
 | Unexpected entity ID | event dropped and counted | none needed | Healthy (invalid counter grows) | `TestFailure_unexpectedEntityID_isCountedAndDropped` |
