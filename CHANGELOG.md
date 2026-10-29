@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-Third milestone (in development on `feature/v0.3.0`, not released): real-time sensor monitoring. Notifications are not part of it.
+Third milestone (implemented on `feature/v0.3.0` and under review in a pull request, not released): real-time sensor monitoring. Notifications are not part of it.
 
 ### Added
 
@@ -53,7 +53,7 @@ Third milestone (in development on `feature/v0.3.0`, not released): real-time se
 - Live state is in memory: after a restart `/sensors` is empty or stale until the first synchronization completes (seconds).
 - A Home Assistant instance whose `get_states` answer exceeds 16 MiB cannot synchronize.
 - Whether a given third-party integration ever sends a state update without `device_class` cannot be settled without that integration; the tracker keeps the previous kind only for unavailable or unknown states, and stops tracking a real value that has no class.
-- Manual Discord acceptance of v0.3.0 has not been performed; see `docs/development/smoke-tests.md` group H.
+- Manual Discord QA of v0.3.0 was performed by the maintainer on 2026-10-29 and is recorded as user-reported in `docs/development/smoke-tests.md` (section 4). Still outstanding: the all-sensors-offline check (L06), the invalid-token (L13) and network-drop (L14) scenarios, the `/permissions`, `/audit` and `/setup` parts of the existing-command check (L17), and a manual capture of the pre-synchronization `/sensors` message (automated tests cover it).
 
 ## [0.2.0] - 2026-10-27
 

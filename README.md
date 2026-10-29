@@ -10,13 +10,13 @@ NeptHass does not replace Home Assistant and has no device drivers. It works thr
 
 ## Project status
 
-NeptHass is being built milestone by milestone. v0.1.0 (Foundation) and v0.2.0 (Interactive Setup) are released. v0.3.0 (Sensor Monitoring) is implemented and awaiting manual acceptance; it is not released. Nothing below is advertised unless it is implemented and verified.
+NeptHass is being built milestone by milestone. v0.1.0 (Foundation) and v0.2.0 (Interactive Setup) are released. v0.3.0 (Sensor Monitoring) is implemented and has been manually tested by the maintainer apart from a few outstanding checks (see docs/development/smoke-tests.md); it is not released. Nothing below is advertised unless it is implemented and verified.
 
 | Milestone | Scope | Status |
 | --- | --- | --- |
 | v0.1.0 | Foundation: configuration, Discord connection, Home Assistant REST client, SQLite, authorization, basic commands, Docker | **Implemented** |
 | v0.2.0 | Interactive `/setup` wizard, entity discovery, aliases, persistent setup sessions, `/sync` | **Implemented** |
-| v0.3.0 | Home Assistant WebSocket, real-time sensor monitoring, reconnection and reconciliation | **Implemented, unreleased** (manual acceptance pending) |
+| v0.3.0 | Home Assistant WebSocket, real-time sensor monitoring, reconnection and reconciliation | **Implemented, unreleased** (maintainer's manual QA mostly recorded; a few checks outstanding) |
 | v0.4.0 | Smart notifications (motion, door/window, leak, battery), cooldowns, outbox | Planned |
 | v0.5.0 | Rules engine: thresholds, durations, quiet hours, hysteresis | Planned |
 | v0.6.0 | Interactive `/home` dashboard | Planned |

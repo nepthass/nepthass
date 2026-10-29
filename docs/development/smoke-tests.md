@@ -178,7 +178,7 @@ Use the dev stack with the `app` profile rebuilt from the v0.2.0 code (`up -d --
 
 Use the dev stack with the `app` profile rebuilt from the v0.3.0 code (`up -d --build`), the simulation at baseline, and the seven virtual sensors shared (run `/setup` or `/permissions allow`; keep the light and switch shared too so the existing commands can be re-checked). The NeptHass log should show `home assistant websocket authenticated`, `home assistant event subscription active` and `home assistant initial synchronization completed`. Monitoring never sends a message by itself: you only see its effects through `/health` and `/sensors`. Rows marked (optional) need container or network control.
 
-Retests required after the release-blocking fixes (commits `e1feb86` to `5bb3bed`, which changed the wording of `/health` and `/sensors`): L12 and L16 (wording and the pre-synchronization message), L01 and L02 (footer), plus every row that has not been executed. L03 requires an actual motion scenario, and L04 requires each of the door, window, high-temperature, water-leak and low-battery scenarios; window events alone do not cover them. Record the tested commit with the results.
+Manual results for this group were recorded on 2026-10-29 (section 4, user-reported). Still outstanding after that run: L06, L13, L14, the remaining L17 commands (`/permissions`, `/audit`, `/setup` step 1 and `/control` off) and a manual capture of the L16 pre-synchronization message.
 
 | # | Step | Expected |
 | --- | --- | --- |
@@ -219,7 +219,7 @@ Version/commit tested: `________`   Tester: `________`   Date: `________`
 | E. Revoking, restarting, auditing | M60-M68 | Not executed | | |
 | F. Resilience | M30-M32 | Not executed | | |
 | G. v0.2.0 setup wizard and /sync | S01-S25 | Partly: see section 4 (user-reported) | User-reported pass for S01, S03, S08, S09, S10, S13, S14, S15, S18, S22 | The other group G rows were not reported |
-| H. v0.3.0 live monitoring | L01-L18 | Not executed | | Manual acceptance of v0.3.0 is pending |
+| H. v0.3.0 live monitoring | L01-L18 | Partly: see section 4 (user-reported, 2026-10-29) | User-reported pass for L01 to L05, L07 to L09, L11, L12, L15, L16 (recovery after start) and L18; L10 from earlier testing on an earlier revision; L17 partly | Not executed or not recorded: L06, L13, L14, the pending L17 commands, and the manual L16 pre-synchronization message |
 
 ## Known gaps
 
@@ -266,9 +266,40 @@ These were produced by commands run against the release tree, never by a person 
 | Migration compatibility: v0.1.0 to v0.2.0 upgrade test, and a read-only copy of a real development database | upgrade preserves grants and audit rows; the copy passes SQLite's integrity check and re-opens as a no-op |
 | `docker compose config` (production, combined example, development with all profiles) and the image build and hardened boot against the real Home Assistant | pass |
 
+### v0.3.0 (group H): user-reported manual results
+
+**Source: the project owner, 2026-10-29.** The owner reported these results from manual Discord and Home Assistant testing on their own development stack. The assistant that prepared this record has no Discord credentials and did **not** execute or observe these checks, so they are recorded as *user-reported* and kept apart from the automated results below. The Discord output and logs the owner captured are in the owner's possession; they are not stored in this repository.
+
+**Revision.** The owner identified `0723116` as the manually tested revision (it contains the release-blocking fixes `e1feb86` to `5bb3bed`). **L10 is the exception:** it comes from earlier manual testing, before those fixes, and its exact revision was not recorded (the branch tip was at or before `6a7d4f2`; the permission check lives in `internal/monitor/reader.go`, which has not changed since `9037a08`). Commits made after `0723116` for the pull request change documentation only; no Go file differs from `0723116`.
+
+| Check | Result | Evidence, as reported |
+| --- | --- | --- |
+| L01 `/health` | User-reported pass | WebSocket line Healthy, seven sensors tracked, snapshot synchronized |
+| L02 `/sensors` baseline | User-reported pass | |
+| L03 motion detected | User-reported pass | |
+| L04 door, window, water leak, temperature and battery scenarios | User-reported pass | user-confirmed manual testing; some of it with captured Discord output |
+| L05 reset | User-reported pass | reported as the motion reset; a full "reset to baseline" run was not itemized |
+| L06 all sensors offline | **Not recorded** | not part of the owner's final report (an earlier report mentioned unavailable-sensor handling in general, without a row-level result); treated as pending |
+| L07 `/status` agrees with `/sensors` | User-reported pass | user-confirmed |
+| L08 unauthorized user denied | User-reported pass | user-confirmed |
+| L09 only shared sensors visible | User-reported pass | user-confirmed |
+| L10 revoke and restore | User-reported pass, **earlier revision** | earlier manual testing; revision not recorded (see above) |
+| L11 alias | User-reported pass | user-confirmed |
+| L12 Home Assistant outage and reconnect | User-reported pass | captured health and log evidence: exponential reconnect delays during a deliberately induced outage, then successful reconnection, authentication, subscription and snapshot synchronization |
+| L13 invalid token | **Not executed manually** | automated coverage only |
+| L14 network drop | **Not executed separately** | the Home Assistant outage and reconnect (L12) was tested, which is a different scenario; automated coverage only (TCP proxy against a real Home Assistant) |
+| L15 graceful shutdown | User-reported pass | the container exited with code 0 |
+| L16 startup recovery | User-reported pass for the recovery after start; **pre-synchronization wording not captured** | synchronization completed too quickly to capture the wording; the pre-synchronization behavior has automated coverage only |
+| L17 existing commands | **Partly** | see below |
+| L18 log hygiene | User-reported pass for the logs inspected | successful WebSocket authentication and event subscription; initial synchronization of seven sensors; exponential reconnect delays during the outage; successful reconnection and resynchronization; clean shutdown and restart; no visible credentials, panic or fatal errors. Not an exhaustive log review |
+
+**L17 evidence.** `/ping`, `/devices`, `/status` and `/control` passed. `/devices` showed five shared entities with read and control levels. `/control` turned `light.nepthass_dev_light` from `off` to `on`, and a later `/status` independently confirmed `State: on` and the alias `Living Room Light`. `/sync` (a group G command, not named in the L17 row) discovered 43 Home Assistant entities, reported zero new and zero removed, and stated that nothing was shared or changed. **Still pending in L17:** `/permissions`, `/audit`, `/setup` step 1 (the monitoring line in the wizard's health step) and the `off` direction of `/control`.
+
+**Outstanding manual coverage.** L06, L13 and L14; the pending parts of L17; and a manual capture of the L16 pre-synchronization message. Automated tests cover the underlying behavior of each of these (see section 1 and the results below), but an automated test is not a manual pass, and none of them is recorded as one.
+
 ### v0.3.0 (`feature/v0.3.0`, unreleased): automated results (executed by the assistant, not manual)
 
-These were produced by commands run against the branch, never by a person in Discord. **Manual group H (L01 to L18) was not executed**: the assistant has no Discord credentials, so no Discord behavior of `/sensors` or the new `/health` line is verified here, and v0.3.0 is not release-ready until the owner runs that checklist.
+These were produced by commands run against the branch, never by a person in Discord. The assistant has no Discord credentials, so none of these results verifies any Discord behavior; that is covered only by the owner's user-reported results above. The first table was produced at commit `c14727d`, before the release-blocking fixes; the second table is the final validation of the code at `0723116` on 2026-10-29.
 
 | Check | Result |
 | --- | --- |
@@ -282,3 +313,13 @@ These were produced by commands run against the branch, never by a person in Dis
 | `docker compose config` for `compose.yaml`, `deploy/compose.with-homeassistant.yaml` and `compose.dev.yaml` (all profiles) | pass; the production files are byte-identical to v0.2.0 |
 | Image build and a hardened container (read-only root, all capabilities dropped, no-new-privileges) started against the real Home Assistant with fake Discord credentials | the application authenticated, the monitor authenticated, subscribed and synchronized 7 sensors, and `home assistant monitoring stopped` was logged before the process exited when Discord rejected the fake token; no token in the logs. No Discord connection was made |
 | Documentation links | 17 Markdown files, 67 relative links checked; one broken anchor from before v0.3.0 (`docs/commands.md` to `setup.md`) |
+
+#### Final validation before the pull request (executed by the assistant, 2026-10-29, code at `0723116`)
+
+| Check | Result |
+| --- | --- |
+| `gofmt -l .`, `go mod verify`, `go vet ./...`, `go vet -tags=integration ./tests/integration/...`, `go build ./cmd/nepthass` | clean |
+| `go test -race -shuffle=on -count=1 ./...` | 13 packages pass; 249 passing test lines including subtests; 0 failures, 0 skips |
+| Integration suite against a real Home Assistant 2026.10.4 (an isolated Compose project, removed afterwards; the owner's dev stack was not used) | 28 tests, 0 failures, 0 skips |
+| `docker compose config` for `compose.yaml`, `deploy/compose.with-homeassistant.yaml` and `compose.dev.yaml` (all profiles); image build | pass; the image carries `org.opencontainers.image.source=https://github.com/nepthass/nepthass` |
+| During the release-blocking fixes (earlier the same day) | the changed packages passed `-race -shuffle=on -count=4` on one CPU; 9 deliberate regressions of the fixes (including retaining a class for a real value) were all caught by the tests |
