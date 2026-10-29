@@ -42,6 +42,11 @@ func (r *Registry) sensors(ctx context.Context, req Request) Reply {
 	if err != nil {
 		return r.fail(req, err)
 	}
+	if res.Total == 0 && res.Status.LastSyncAt.IsZero() {
+		// The tracker is empty only because monitoring has not loaded anything yet.
+		// That says nothing about what is shared, so do not claim nothing is.
+		return Reply{Content: notSynchronizedText(res.Status)}
+	}
 	if res.Total == 0 {
 		return Reply{Content: "No monitored sensors are shared with you. An administrator can share a temperature, humidity, battery, motion, door, window or water-leak sensor with `/setup` or `/permissions allow`."}
 	}
@@ -56,6 +61,23 @@ func (r *Registry) sensors(ctx context.Context, req Request) Reply {
 	e := ui.Embed("Sensors", desc, color)
 	e.Footer = &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Page %d of %d. Live readings from Home Assistant's WebSocket. Use /status for an authoritative read of one entity.", res.Page, res.Pages)}
 	return Reply{Embeds: []*discordgo.MessageEmbed{e}}
+}
+
+// notSynchronizedText explains why there is nothing to show before the first
+// synchronization. It deliberately says nothing about what is or is not shared
+// with the caller: until Home Assistant has been read, that is unknown.
+func notSynchronizedText(st monitor.Status) string {
+	const suffix = " Sensor readings are not available yet."
+	switch {
+	case st.State == monitor.StateStopped || st.State == monitor.StateDisconnected:
+		return ui.IconDisabled + " Live monitoring is not running." + suffix
+	case st.LastFailure == monitor.FailureAuthentication:
+		return ui.IconFail + " Live monitoring cannot sign in to Home Assistant's WebSocket (the access token was rejected; an administrator should check HA_TOKEN)." + suffix
+	case st.LastFailure != monitor.FailureNone:
+		return ui.IconWarn + " Live monitoring has not reached Home Assistant's WebSocket yet and keeps retrying." + suffix + " Try again in a moment."
+	default:
+		return "\u23F3 Live monitoring is still starting and has not loaded the sensors yet." + suffix + " Try again in a few seconds."
+	}
 }
 
 func staleBanner(st monitor.Status) string {

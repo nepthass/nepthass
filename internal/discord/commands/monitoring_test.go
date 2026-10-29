@@ -75,7 +75,7 @@ func TestSensors_escapeHostileNamesFromHomeAssistant(t *testing.T) {
 	}
 }
 
-func TestSensors_requireAnAllowlistedUser_andExplainEmptyStates(t *testing.T) {
+func TestSensors_requireAnAllowlistedUser_andExplainTheNotYetSynchronizedState(t *testing.T) {
 	e := newMonitorEnv(t)
 	e.track("sensor.temp", monitor.CategoryTemperature, "1", "", "T")
 
@@ -86,7 +86,13 @@ func TestSensors_requireAnAllowlistedUser_andExplainEmptyStates(t *testing.T) {
 	if strings.Contains(stranger, "sensor.temp") {
 		t.Error("a stranger saw sensor data")
 	}
-	mustContain(t, empty, "No monitored sensors are shared with you", "/setup")
+	// This monitor never ran, so nothing was loaded: that must not be reported as
+	// "nothing is shared". The genuine empty state is covered once synchronized
+	// (monitoring_startup_test.go).
+	mustContain(t, empty, "not available yet")
+	if strings.Contains(empty, "No monitored sensors are shared with you") {
+		t.Errorf("claimed nothing is shared before any synchronization:\n%s", empty)
+	}
 }
 
 func TestSensors_revocationHidesTheSensorOnTheNextCall(t *testing.T) {
