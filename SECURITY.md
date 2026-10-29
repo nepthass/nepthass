@@ -16,7 +16,7 @@ NeptHass is pre-1.0. Only the latest release receives security fixes.
 Report it privately:
 
 1. If the repository's **Security** tab offers **Report a vulnerability** (GitHub's private vulnerability reporting), use it: only the maintainers see the report. It is not offered while the repository is private, and a maintainer has to enable it.
-2. If it is not available, open an issue titled **Security contact request** that says only that you have a security concern and **contains no details** (no description, logs or entity names), or use the contact options on the maintainers' GitHub profile or organization page. A maintainer will then agree a private channel with you, normally a draft GitHub security advisory that is shared only with you.
+2. If it is not available, open an issue titled **Security contact request** that says only that you have a security concern and **contains no details** (no description, logs or entity names), or use the contact options on the maintainers' GitHub profile or organization page. A maintainer will then agree a private channel with you before any details are shared.
 
 Once you have a private channel, include:
 
