@@ -60,7 +60,8 @@ type Config struct {
 	// callback MUST be constant-time and non-blocking and MUST NOT perform I/O
 	// (no database, network, channel send that can block, or sleeping). It may read
 	// the Tracker (Get, All, Len); it must not call Monitor.Run. A panic is
-	// recovered, counted (HookPanics) and logged, and the monitor carries on.
+	// recovered, counted (HookPanics) and logged by type only (its value could carry
+	// sensitive text), and the monitor carries on.
 	OnChange func(Change)
 }
 
@@ -289,11 +290,9 @@ func (m *Monitor) emit(c Change) {
 	defer func() {
 		if r := recover(); r != nil {
 			m.hookPanics.Add(1)
-			text := fmt.Sprint(r)
-			if len(text) > 200 {
-				text = text[:200]
-			}
-			m.log.Error("monitoring change callback panicked; the monitor keeps running", "panic", text)
+			// Only the type is logged: the value may be an error built from sensor
+			// data or other sensitive text, and formatting it would call its Error method.
+			m.log.Error("monitoring change callback panicked; the monitor keeps running", "panic_type", fmt.Sprintf("%T", r))
 		}
 	}()
 	m.cfg.OnChange(c)

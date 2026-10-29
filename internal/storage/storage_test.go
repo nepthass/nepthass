@@ -234,8 +234,12 @@ func TestMigrate_upgradesAV010Database_withoutLosingGrantsOrAuditRecords(t *test
 	if got := count("SELECT count(*) FROM sqlite_master WHERE name IN ('entity_aliases','setup_sessions','known_entities','idx_setup_sessions_one_active')"); got != 4 {
 		t.Errorf("new schema objects = %d, want 4", got)
 	}
-	if got := count("SELECT count(*) FROM schema_migrations"); got != 2 {
-		t.Errorf("schema_migrations rows = %d, want 2", got)
+	embedded, err := fs.Glob(migrations.FS, "*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := count("SELECT count(*) FROM schema_migrations"); got != len(embedded) {
+		t.Errorf("schema_migrations rows = %d, want one per embedded migration (%d)", got, len(embedded))
 	}
 }
 

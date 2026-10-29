@@ -2,7 +2,9 @@ package monitor
 
 import (
 	"fmt"
+	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -283,5 +285,41 @@ func TestOnChange_unsetIsTheOriginalBehaviourAndConsumesNoSequence(t *testing.T)
 	defer tr.mu.RUnlock()
 	if tr.seq != 0 {
 		t.Errorf("with no callback no Change is built and no sequence number is used: seq=%d", tr.seq)
+	}
+}
+
+// leakyPanic is a panic value whose text is sensitive: formatting it (as the
+// logger once did with fmt.Sprint) would write the secret into the logs.
+type leakyPanic struct{}
+
+func (leakyPanic) Error() string { return "token=SUPERSECRET-4711" }
+
+func TestOnChange_aPanicLogsOnlyItsTypeNeverItsValue(t *testing.T) {
+	var logs syncBuffer
+	var calls int
+	r := newRig(t, func(c *Config) {
+		c.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+		c.OnChange = func(Change) {
+			calls++ // always on the one goroutine that mutates the tracker
+			if calls%2 == 0 {
+				panic("SUPERSECRET-text-panic")
+			}
+			panic(leakyPanic{})
+		}
+	}).start()
+	r.waitReady()
+
+	got := logs.String()
+	if r.m.HookPanics() != seededSensors {
+		t.Fatalf("hook panics = %d, want %d", r.m.HookPanics(), seededSensors)
+	}
+	if !strings.Contains(got, "callback panicked") || !strings.Contains(got, "panic_type=") {
+		t.Fatalf("the panic must still be logged, by type: %s", got)
+	}
+	if !strings.Contains(got, "leakyPanic") || !strings.Contains(got, "panic_type=string") {
+		t.Errorf("the log should name the panic types: %s", got)
+	}
+	if strings.Contains(got, "SUPERSECRET") {
+		t.Errorf("a panic value leaked into the logs:\n%s", got)
 	}
 }
