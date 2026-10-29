@@ -79,6 +79,33 @@ type Tracker struct {
 // NewTracker returns an empty tracker.
 func NewTracker() *Tracker { return &Tracker{sensors: make(map[entities.ID]Sensor)} }
 
+// notReporting reports whether a raw state means "no real value".
+func notReporting(raw string) bool { return raw == "unavailable" || raw == "unknown" }
+
+// retainClass lets a tracked sensor that reports unavailable or unknown, with
+// no device_class attribute at all, keep the class (and unit and name) it
+// already has. Home Assistant normally keeps device_class on an unavailable
+// entity, but an update can omit it (for example a placeholder whose registry
+// entry never recorded one). Dropping the sensor then would make it vanish from
+// the listing instead of showing "unavailable", while retaining it is safe: its
+// meaning comes from the raw state, which is not-reporting and never "safe".
+//
+// It does not apply to a real value without a class (it cannot be interpreted,
+// so the sensor stops being tracked), nor to an explicit different class.
+func retainClass(cur Sensor, u Update) Update {
+	if u.Removed || u.Category != "" || u.DeviceClass != "" || !notReporting(u.Raw) {
+		return u
+	}
+	u.Category, u.DeviceClass = cur.Category, cur.DeviceClass
+	if u.Unit == "" {
+		u.Unit = cur.Unit
+	}
+	if u.Name == "" {
+		u.Name = cur.Name
+	}
+	return u
+}
+
 func sameObservation(s Sensor, u Update) bool {
 	return s.Raw == u.Raw && s.Unit == u.Unit && s.DeviceClass == u.DeviceClass && s.Name == u.Name &&
 		s.LastChanged.Equal(u.LastChanged) && s.LastUpdated.Equal(u.LastUpdated)
@@ -89,6 +116,9 @@ func (t *Tracker) Apply(u Update, now time.Time) Result {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	cur, exists := t.sensors[u.ID]
+	if exists {
+		u = retainClass(cur, u)
+	}
 
 	switch {
 	case u.Removed:
@@ -160,6 +190,10 @@ func (t *Tracker) Reconcile(snapshot []Update, now time.Time) Reconciled {
 	next := make(map[entities.ID]Sensor, len(snapshot))
 	var r Reconciled
 	for _, u := range snapshot {
+		prev, existed := t.sensors[u.ID]
+		if existed {
+			u = retainClass(prev, u)
+		}
 		if u.Category == "" || u.Removed {
 			continue
 		}
@@ -170,7 +204,6 @@ func (t *Tracker) Reconcile(snapshot []Update, now time.Time) Reconciled {
 			r.Dropped++
 			continue
 		}
-		prev, existed := t.sensors[u.ID]
 		switch {
 		case !existed:
 			next[u.ID] = newSensor(u, now, 1)
