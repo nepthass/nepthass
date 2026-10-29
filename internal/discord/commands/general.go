@@ -11,6 +11,7 @@ import (
 	"github.com/nepthass/nepthass/internal/auth"
 	"github.com/nepthass/nepthass/internal/discord/ui"
 	"github.com/nepthass/nepthass/internal/homeassistant/rest"
+	"github.com/nepthass/nepthass/internal/monitor"
 )
 
 const probeTimeout = 8 * time.Second
@@ -39,6 +40,10 @@ type HealthReport struct {
 	HAVersion string
 	HAErr     error
 	DBErr     error
+	// Monitoring is the WebSocket monitoring status (nil when not running).
+	// It is reported but does not make the overall check fail: REST commands
+	// and setup work without it.
+	Monitoring *monitor.Status
 }
 
 // OK reports whether every probed subsystem is healthy.
@@ -49,7 +54,12 @@ func (r *Registry) Probe(ctx context.Context) HealthReport {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	info, haErr := r.deps.HA.Info(ctx)
-	return HealthReport{Gateway: r.deps.Gateway(), HAVersion: info.Version, HAErr: haErr, DBErr: r.deps.DB.PingContext(ctx)}
+	rep := HealthReport{Gateway: r.deps.Gateway(), HAVersion: info.Version, HAErr: haErr, DBErr: r.deps.DB.PingContext(ctx)}
+	if r.deps.Monitoring != nil {
+		st := r.deps.Monitoring.Status()
+		rep.Monitoring = &st
+	}
+	return rep
 }
 
 func (r *Registry) health(ctx context.Context, _ Request) Reply {
@@ -65,14 +75,14 @@ func (r *Registry) health(ctx context.Context, _ Request) Reply {
 		gatewayText = ui.IconFail + " Not connected"
 	}
 	color := ui.ColorOK
-	if !rep.OK() {
+	if !rep.OK() || (rep.Monitoring != nil && !rep.Monitoring.Healthy) {
 		color = ui.ColorWarn
 	}
 	e := ui.Embed("Health", "", color)
 	e.Fields = []*discordgo.MessageEmbedField{
 		ui.Field("Discord gateway", gatewayText, false),
 		ui.Field("Home Assistant REST API", check(rep.HAErr, "Connected (Home Assistant "+ui.Escape(rep.HAVersion)+")"), false),
-		ui.Field("Home Assistant WebSocket", ui.IconDisabled+" Not available in this release (planned for v0.3.0)", false),
+		ui.Field("Home Assistant WebSocket (live monitoring)", MonitoringText(rep.Monitoring), false),
 		ui.Field("Database", check(rep.DBErr, "Database is responding"), false),
 	}
 	e.Footer = &discordgo.MessageEmbedFooter{Text: "NeptHass " + r.deps.Version}

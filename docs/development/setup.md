@@ -176,6 +176,10 @@ To return only the **simulation** to its baseline without losing Home Assistant 
 
 With the stack running (`--profile app`), run `/setup` in your test server. The virtual light, switch, motion, door, window, temperature, humidity, water-leak and battery entities show up in discovery under the name "NeptHass Dev ...", with the states described in [virtual-devices.md](virtual-devices.md). Use the `NeptHass Dev` scenarios (for example "all sensors offline") to see unavailable states in the wizard. The step-by-step manual checklist is group G of [smoke-tests.md](smoke-tests.md).
 
+## Trying live monitoring (v0.3.0)
+
+With the stack running (`--profile app`), `/health` should show "Healthy: N sensors tracked" on the "Home Assistant WebSocket (live monitoring)" line, with all four layers ticked. Share the seven virtual sensors (`/setup`), then run `/sensors` and trigger scenarios in Home Assistant as described in [virtual-devices.md](virtual-devices.md#using-them-with-live-monitoring-v030). To see recovery, restart only Home Assistant (`docker compose --env-file .env.dev -f compose.dev.yaml restart homeassistant`) and watch `/health` go to reconnecting and back. The checklist is group H of [smoke-tests.md](smoke-tests.md).
+
 ## Running the Go tests
 
 Unit tests need no Docker Home Assistant and no Discord:

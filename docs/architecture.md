@@ -12,11 +12,13 @@ internal/audit          audit log table + retention (usable inside a transaction
 internal/entities       entity model, permissions, aliases, discovery cache, sync registry, the shared grant rule, Service
 internal/setup          setup sessions: state machine, store, plan, atomic apply (Discord-free)
 internal/homeassistant/rest   Home Assistant REST client (service allowlist)
+internal/homeassistant/ws     Home Assistant WebSocket session: handshake, id correlation, reader, ping (one connection)
+internal/monitor        live sensor monitoring: state machine, backoff, snapshot reconciliation, tracker, authorization Reader
 internal/discord        gateway session, interaction routing, component and modal handling, retry/backoff
 internal/discord/commands     slash command definitions and replies
 internal/discord/wizard       the /setup wizard: panels, custom IDs, click handling
 internal/discord/ui           shared embed helpers: branding, escaping, limits
-tests/fakeha            in-memory Home Assistant used by unit tests
+tests/fakeha            in-memory Home Assistant (REST and a scriptable WebSocket endpoint) used by unit tests
 tests/integration       tests against a real Home Assistant (build tag "integration")
 ```
 
@@ -66,7 +68,7 @@ Each package owns the SQL for its own table. Timestamps are fixed-width UTC text
 - **Discord drops after start:** discordgo reconnects and resumes the gateway by itself.
 - **Home Assistant unreachable at start:** logged as a warning; NeptHass keeps running and uses it once it answers. A rejected token stops the process (a restart cannot fix it).
 - **Home Assistant unreachable later:** commands answer with a friendly error; each request has a timeout and redirects are never followed.
-- **Shutdown:** SIGTERM or SIGINT cancels the root context; the Discord session is closed and the database released.
+- **Shutdown:** SIGTERM or SIGINT cancels the root context; the monitor closes its WebSocket and returns, the Discord session is closed and the database released. Shutdown waits for the monitor and the audit retention task.
 
 ## Logging and secrets
 
@@ -76,7 +78,7 @@ Each package owns the SQL for its own table. Timestamps are fixed-width UTC text
 
 - **Pure-Go SQLite (`modernc.org/sqlite`)** instead of CGO: a static binary, a distroless image, trivial cross-compilation.
 - **Standard library first:** configuration parsing, HTTP, logging, migrations and rate limiting use only the standard library. Runtime dependencies are discordgo and the SQLite driver.
-- **REST only in v0.1.0:** the WebSocket client arrives with real-time monitoring in v0.3.0.
+- **REST for commands, WebSocket for monitoring:** commands read and control through REST (authoritative, one request per use). Live sensor state comes from one WebSocket connection (v0.3.0). The REST path never depends on the WebSocket, so commands keep working while monitoring is down.
 
 ## Interactive setup (v0.2.0)
 
@@ -88,3 +90,15 @@ The wizard is an explicit state machine (`internal/setup`): steps `health, disco
 - **Stale confirmations.** If an entity changed outside the session, apply writes nothing, rebases the draft onto the live state, bumps the version (killing the old confirmation) and sends the administrator back to review.
 - **Discovery and sync.** `entities.Discovery` keeps one immutable snapshot of compact items (30 second reuse; Refresh, `/sync` and apply always refetch). `/sync` additionally records entity IDs in `known_entities` to report new, removed and returned entities across restarts; names and states are never stored.
 - **Aliases.** Stored by canonical ID; resolution tries an entity ID first and only resolves an alias to an entity the caller already has the required access on.
+
+## Sensor monitoring (v0.3.0)
+
+The full design, protocol and rationale are in [design/sensor-monitoring.md](design/sensor-monitoring.md). In short:
+
+- `internal/monitor.Monitor` is created in `serve()`, started in the application's background `WaitGroup` and stopped by the same context as the bot. There is no global state.
+- Each connection is an `internal/homeassistant/ws.Session` with exactly two goroutines (reader and pinger). A new session is never dialed before the previous one has been closed and joined, so a subscription can never be duplicated.
+- The connection moves through `connecting, authenticating, subscribing, synchronizing, ready`, and `reconnecting` (backoff) after any failure. Health is five separate facts (transport, authentication, subscription, snapshot, proof of life); `/health` shows them separately and only `ready` plus a recent frame is "healthy".
+- After every (re)connect NeptHass subscribes to `state_changed`, buffers events, fetches `get_states`, applies the snapshot as authoritative, then replays the buffered events through the per-sensor ordering rule (`last_updated`). Home Assistant does not replay missed events, and NeptHass never invents them.
+- `Tracker` keeps the latest state of every classified `sensor`/`binary_sensor` (temperature, humidity, battery, motion, door, window, water leak, battery low) in memory only: duplicates and stale events are dropped, memory is bounded, nothing is written to SQLite and there is no migration.
+- `Reader` is the only way monitored data reaches a Discord user. It re-checks the caller's level and the entity's *current* permission on every read, so the cache grants nothing and revocation is immediate. `/sensors` and the `/health` monitoring line are built on it.
+- Dependency direction: `discord/commands -> monitor -> {entities, auth, config, homeassistant/ws}`. `monitor` knows nothing about Discord.

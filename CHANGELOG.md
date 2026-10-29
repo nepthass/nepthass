@@ -6,6 +6,56 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-29
+
+Third milestone: real-time sensor monitoring. Notifications are not part of it.
+
+### Added
+
+- Home Assistant WebSocket client (`internal/homeassistant/ws`): URL derivation (`http` to `ws`, `https` to `wss`, path prefix kept), authentication handshake, strictly increasing command ids with result correlation, `state_changed` subscription, `get_states` snapshot, application-level ping with pong timeout, read and write deadlines, size limits (64 KiB before authentication, 16 MiB after), and typed errors. The token is sent once and never logged.
+- Monitoring supervisor (`internal/monitor`): an explicit connection state machine (disconnected, connecting, authenticating, subscribing, synchronizing, ready, reconnecting, stopped) with a table of legal transitions, owned by the application and stopped with it.
+- Reconnection with exponential backoff (1 s up to 60 s) and equal jitter; authentication failures use a slow schedule (30 s up to 10 min); the schedule resets only after a connection stayed ready for 30 s, so a flapping server cannot cause a reconnect storm.
+- Reconciliation after every connect: subscribe, buffer events (bounded at 4096), fetch the authoritative snapshot, apply it, replay the buffered events through the per-sensor ordering rule, then go ready. Entities that vanished while disconnected are removed.
+- Sensor classification by domain and `device_class` (temperature, humidity, battery level, battery low, motion, door, window, water leak) with the raw state kept apart from its interpreted meaning; `unavailable`, `unknown` and invalid values are never presented as a safe state.
+- In-memory state tracker with per-sensor ordering by `last_updated`, duplicate and stale-event protection, attribute-only update handling, entity removal and reappearance, validation of untrusted payloads and a hard bound of 10,000 tracked sensors.
+- `/sensors [page]`: live readings of the monitored sensors shared with you, with aliases, interpreted meaning, raw state for binary sensors, units, time of the last change and a clear stale banner when monitoring is not healthy.
+- `/health` and the setup wizard's health step now report the monitoring state: the five layers separately, last synchronization and event times, reconnect and invalid-message counters, and the failure category (never a URL, token or raw error).
+- Test infrastructure: a scriptable fake Home Assistant WebSocket endpoint (`tests/fakeha`), a failure-injection suite, real Home Assistant integration tests including a deterministic network outage through a TCP proxy, and authorization negatives.
+
+### Changed
+
+- `gorilla/websocket` upgraded from 1.4.2 to 1.5.3 (already in the dependency graph through discordgo; no new module).
+- `/health` no longer says the WebSocket is "not available in this release".
+- The repository moved from a personal account to the `nepthass` GitHub organization (`github.com/nepthass/nepthass`). Clone URLs, the changelog compare links and the image source label now point there. The Go module path was already `github.com/nepthass/nepthass` and is unchanged. Published release notes and history keep the earlier URLs, which GitHub redirects.
+
+### Fixed
+
+- `/sensors` no longer answers "No monitored sensors are shared with you" before the first synchronization (right after a restart, or while Home Assistant is unreachable at startup). It now says that readings are not available yet, with the reason, and nothing about what is shared. The real empty state is kept for a synchronized monitor.
+- `/health` no longer calls a reconnection "Starting": after an earlier failure the stages read "Reconnecting", with the previous failure category. The next retry time is an absolute clock time instead of a relative Discord timestamp that turned into "seconds ago".
+- The `/sensors` footer says "Live readings" only while monitoring is healthy and synchronized, and "Last known values, not live" otherwise.
+- `subscribe_events` and `get_states` are bounded by timeouts (15 s and 60 s). A peer that answered pings but never answered one of them used to leave the monitor waiting forever; the attempt now ends and the normal backoff takes over.
+- A tracked sensor that reports `unavailable` or `unknown` with no `device_class` attribute keeps its previous kind instead of disappearing from `/sensors`.
+
+### Security
+
+- Monitored data reaches users only through a `Reader` that checks the caller's level and the entity's *current* permission on every read (deny by default; an unshared entity is indistinguishable from an unknown one; revocation is immediate even for cached data).
+- Home Assistant payloads are validated as untrusted input (entity ID, lengths, timestamps; only the entity, state, timestamps and three attributes are read).
+- Monitoring adds no write path: control is unchanged (lights and switches only).
+
+### Upgrade notes
+
+- No database migration and no new environment variable. A v0.2.0 database works unchanged and v0.2.0 can read it back.
+- The monitor reuses `HA_URL` and `HA_TOKEN`. A reverse proxy in front of Home Assistant must allow WebSocket upgrades on `/api/websocket`.
+
+### Known limitations
+
+- Monitoring observes only: no notifications (v0.4.0), no rules (v0.5.0), no dashboard (v0.6.0).
+- Only the eight sensor categories above are tracked; other sensors stay available through `/devices` and `/status`.
+- A change that happens and reverses while NeptHass is disconnected cannot be seen; Home Assistant does not replay events and NeptHass does not invent them.
+- Live state is in memory: after a restart `/sensors` is empty or stale until the first synchronization completes (seconds).
+- A Home Assistant instance whose `get_states` answer exceeds 16 MiB cannot synchronize.
+- Whether a given third-party integration ever sends a state update without `device_class` cannot be settled without that integration; the tracker keeps the previous kind only for unavailable or unknown states, and stops tracking a real value that has no class.
+
 ## [0.2.0] - 2026-10-27
 
 Second milestone: interactive setup.
@@ -67,6 +117,7 @@ First milestone: the foundation.
 - A single Discord guild is supported.
 - `/devices` lists 10 entities per page via a `page` option; interactive pagination arrives with the dashboard.
 
-[Unreleased]: https://github.com/JameelSawafta/nepthass/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/JameelSawafta/nepthass/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/JameelSawafta/nepthass/releases/tag/v0.1.0
+[Unreleased]: https://github.com/nepthass/nepthass/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/nepthass/nepthass/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/nepthass/nepthass/compare/a7fbdd97a3651874960dd5c08f17c5c65dca1e59...v0.2.0
+[0.1.0]: https://github.com/nepthass/nepthass/commit/a7fbdd97a3651874960dd5c08f17c5c65dca1e59

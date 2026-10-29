@@ -17,6 +17,8 @@ import (
 	"github.com/nepthass/nepthass/internal/discord/commands"
 	"github.com/nepthass/nepthass/internal/entities"
 	"github.com/nepthass/nepthass/internal/homeassistant/rest"
+	"github.com/nepthass/nepthass/internal/homeassistant/ws"
+	"github.com/nepthass/nepthass/internal/monitor"
 	"github.com/nepthass/nepthass/internal/setup"
 	"github.com/nepthass/nepthass/internal/storage"
 	"github.com/nepthass/nepthass/tests/fakeha"
@@ -84,6 +86,7 @@ type harness struct {
 	ha    *fakeha.Server
 	perms *entities.Permissions
 	audit *audit.Log
+	mon   *monitor.Monitor
 }
 
 func newHarness(t *testing.T) *harness {
@@ -101,13 +104,22 @@ func newHarness(t *testing.T) *harness {
 	disc := entities.NewDiscovery(entities.DiscoveryDeps{HA: client, DB: db, Permissions: perms, Now: time.Now})
 	setupSvc := setup.NewService(setup.Deps{DB: db, Store: setup.NewStore(db), Discovery: disc, Permissions: perms, Aliases: entities.NewAliases(db), Audit: auditLog, Now: time.Now})
 	svc := entities.NewService(entities.Deps{HA: client, Permissions: perms, Aliases: entities.NewAliases(db), Audit: auditLog, Logger: logger, Now: time.Now})
-	bot, err := New(config.Discord{
-		Token: "discord-token-for-tests", GuildID: guildID, AdminUserIDs: []string{adminID}, AllowedUserIDs: []string{userID},
-	}, commands.Deps{Entities: svc, Discovery: disc, Audit: auditLog, HA: client, DB: db, Logger: logger, Version: "test"}, setupSvc)
+	aliases := entities.NewAliases(db)
+	mon, err := monitor.New(monitor.Config{
+		HomeAssistant: config.HomeAssistant{URL: ha.URL, Token: haToken, Timeout: 2 * time.Second},
+		Backoff:       monitor.Backoff{Initial: 2 * time.Millisecond, Max: 16 * time.Millisecond, AuthInitial: 20 * time.Millisecond, AuthMax: 80 * time.Millisecond, StableAfter: time.Hour},
+		Session:       ws.Options{HandshakeTimeout: time.Second, PingInterval: time.Hour},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &harness{bot: bot, api: &fakeAPI{}, ha: ha, perms: perms, audit: auditLog}
+	bot, err := New(config.Discord{
+		Token: "discord-token-for-tests", GuildID: guildID, AdminUserIDs: []string{adminID}, AllowedUserIDs: []string{userID},
+	}, commands.Deps{Entities: svc, Discovery: disc, Monitoring: monitor.NewReader(mon, perms, aliases), Audit: auditLog, HA: client, DB: db, Logger: logger, Version: "test"}, setupSvc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &harness{bot: bot, api: &fakeAPI{}, ha: ha, perms: perms, audit: auditLog, mon: mon}
 }
 
 func (h *harness) send(i *discordgo.Interaction) {
@@ -547,5 +559,89 @@ func TestSync_reportsThroughTheBot_forAdministratorsOnly_andNeverShares(t *testi
 	}
 	if perms, _ := h.perms.List(context.Background()); len(perms) != 0 {
 		t.Errorf("sync shared something: %+v", perms)
+	}
+}
+
+// --- v0.3.0: live monitoring through the real interaction pipeline ---
+
+// startMonitoring runs the monitor against the fake Home Assistant and waits until it is healthy.
+func (h *harness) startMonitoring(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	go h.mon.Run(ctx)
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-h.mon.Done():
+		case <-time.After(10 * time.Second):
+			t.Error("the monitor did not stop")
+		}
+	})
+	h.waitMonitor(t, func(s monitor.Status) bool { return s.Healthy })
+}
+
+func (h *harness) waitMonitor(t *testing.T, pred func(monitor.Status) bool) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := h.mon.WaitFor(ctx, pred); err != nil {
+		t.Fatalf("monitoring condition not reached: %v (%+v)", err, h.mon.Status())
+	}
+}
+
+func TestSensors_showLiveChangesThroughTheBot_andRevocationAppliesImmediately(t *testing.T) {
+	h := newHarness(t)
+	h.ha.Set("binary_sensor.door", "off", map[string]any{"device_class": "door", "friendly_name": "Front Door"})
+	h.ha.Set("binary_sensor.leak", "on", map[string]any{"device_class": "moisture", "friendly_name": "Basement Leak"})
+	if err := h.perms.Set(context.Background(), entities.Grant{ID: "binary_sensor.door", Access: entities.AccessRead, GrantedBy: adminID, At: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	h.startMonitoring(t)
+
+	h.send(slash(guildID, userID, "sensors"))
+	closed := h.api.finalText()
+	h.ha.Update("binary_sensor.door", "on", map[string]any{"device_class": "door", "friendly_name": "Front Door"})
+	h.waitMonitor(t, func(monitor.Status) bool { s, _ := h.mon.Tracker().Get("binary_sensor.door"); return s.Raw == "on" })
+	h.send(slash(guildID, userID, "sensors"))
+	opened := h.api.finalText()
+	h.send(slash(guildID, userID, "health"))
+	health := h.api.finalText()
+	if _, err := h.perms.Revoke(context.Background(), "binary_sensor.door"); err != nil {
+		t.Fatal(err)
+	}
+	h.send(slash(guildID, userID, "sensors"))
+	revoked := h.api.finalText()
+
+	if !strings.Contains(closed, "closed (off)") || !strings.Contains(opened, "open (on)") || strings.Contains(opened, "last known values") {
+		t.Errorf("closed:\n%s\nopened:\n%s", closed, opened)
+	}
+	if strings.Contains(closed+opened+health+revoked, "Basement") || strings.Contains(closed+opened, "binary_sensor.leak") {
+		t.Error("an unshared sensor leaked through the bot")
+	}
+	if !strings.Contains(health, "Healthy: 2 sensors tracked") || !strings.Contains(health, "Snapshot ✅") {
+		t.Errorf("health = %s", health)
+	}
+	if strings.Contains(revoked, "Front Door") || !strings.Contains(revoked, "No monitored sensors are shared") {
+		t.Errorf("after revocation:\n%s", revoked)
+	}
+}
+
+func TestSensors_aStrangerGetsNothing_andHealthNeverShowsInfrastructure(t *testing.T) {
+	h := newHarness(t)
+	h.ha.Set("binary_sensor.door", "on", map[string]any{"device_class": "door"})
+	h.startMonitoring(t)
+
+	h.send(slash(guildID, outsider, "sensors"))
+	stranger := h.api.finalText()
+	h.send(slash(guildID, userID, "health"))
+	health := h.api.finalText()
+
+	if stranger != "You are not authorized to use NeptHass." {
+		t.Errorf("stranger = %q", stranger)
+	}
+	for _, forbidden := range []string{"127.0.0.1", "http://", "ws://", haToken} {
+		if strings.Contains(health, forbidden) {
+			t.Errorf("/health leaked %q:\n%s", forbidden, health)
+		}
 	}
 }

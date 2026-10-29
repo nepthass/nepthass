@@ -4,7 +4,7 @@ go 1.27
 
 require (
 	github.com/bwmarrin/discordgo v0.29.0
-	github.com/gorilla/websocket v1.4.2
+	github.com/gorilla/websocket v1.5.3
 	modernc.org/sqlite v1.61.0
 )
 

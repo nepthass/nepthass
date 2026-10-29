@@ -5,8 +5,9 @@ All replies are ephemeral (only the person who ran the command sees them) and ne
 | Command | Who | Purpose |
 | --- | --- | --- |
 | [`/ping`](#ping) | users | Check the bot responds |
-| [`/health`](#health) | users | Discord, Home Assistant and database status |
+| [`/health`](#health) | users | Discord, Home Assistant, live monitoring and database status |
 | [`/devices`](#devices) | users | List the entities shared with you |
+| [`/sensors`](#sensors) | users | Live readings of the monitored sensors shared with you |
 | [`/status`](#status) | users | Show a shared entity's state |
 | [`/control`](#control) | users | Turn a shared light or switch on or off |
 | [`/setup`](#setup) | administrators | Interactive wizard: discover, share and name entities |
@@ -26,11 +27,37 @@ Replies with the Discord gateway latency.
 
 ## /health
 
-Discord gateway, Home Assistant REST API (with its version) and the database. The Home Assistant WebSocket line says it is not available: monitoring arrives in v0.3.0.
+Discord gateway, Home Assistant REST API (with its version) and the database. A fourth line, **Home Assistant WebSocket (live monitoring)**, reports the real-time connection. It lists five layers separately (Transport, Authenticated, Subscribed, Snapshot, and proof of life) and shows **Healthy** only when all of them hold:
+
+- **Healthy: N sensors tracked, synchronized ..., last event ...**: connected, subscribed, synchronized and receiving.
+- **Starting (connecting), (authenticating), (subscribing) or (synchronizing)**: the first start; not healthy yet. A connected, authenticated, subscribed monitor without a snapshot is not healthy.
+- **Reconnecting (authenticating), (subscribing) or (synchronizing)**, and **Reconnecting to Home Assistant's WebSocket (the previous attempt failed: ...)**: the same stages after an earlier failure. A reconnection is never called "Starting". Last known values may be outdated.
+- **Connected but silent**: nothing has been received recently; values may be outdated.
+- **Cannot reach Home Assistant's WebSocket; retrying, next attempt at <time>**: the connection is down and will retry with backoff. The time is an absolute clock time in your time zone, because a relative one would read "... seconds ago" once the moment has passed while the message is still on screen. The same line is used when Home Assistant accepts the connection but does not answer the subscription (15 seconds) or the snapshot (60 seconds) in time.
+- **Home Assistant rejected the access token for the WebSocket (check HA_TOKEN)**: a credential problem, retried slowly.
+- **Unexpected response from Home Assistant's WebSocket; retrying**: a protocol problem.
+
+It also shows the reconnect count and the number of invalid messages ignored. It never shows the Home Assistant URL, the token or raw error text. Monitoring problems do not stop `/devices`, `/status` or `/control`, which use the REST API.
 
 ## /devices
 
 `/devices [page]` lists the entities you may see, 10 per page, with live state, your access level (`read` or `control`) and the alias if one is set. Entities Home Assistant no longer reports are marked "not found in Home Assistant". Unavailable and unknown states are spelled out as "not reporting", never as off or safe.
+
+## /sensors
+
+`/sensors [page]` (users) lists, ten per page, the monitored sensors that are shared with you at `read` or `control`, sorted by name. Each line shows the alias (or Home Assistant's friendly name), the entity ID, the category, the interpreted state, and when it last changed:
+
+- Numeric sensors show the value with Home Assistant's unit (`21.5 °C`).
+- Binary sensors show the meaning with the raw state: a door with raw `on` is *open (on)*, motion `on` is *motion detected (on)*, a moisture sensor `on` is *water detected (on)*, a battery sensor `on` is *low (on)*.
+- `unavailable` and `unknown` are shown as *not reporting* with a warning icon, and an unexpected value as *invalid value*; they are never shown as closed, clear or dry.
+
+When live monitoring is not healthy, an amber banner says the values are the last known ones and may be outdated, every line carries a warning icon, and the footer says "Last known values, not live". The footer says "Live readings from Home Assistant's WebSocket" only while monitoring is healthy and synchronized. The permission is checked again on every call: revoking a share removes the sensor from the very next `/sensors`. Entities that are not monitored sensors (lights, switches, other sensor types) are not listed here; use `/devices` and `/status`. For an authoritative read of one entity, `/status` queries Home Assistant directly.
+
+**Before the first synchronization** (right after NeptHass starts, or while Home Assistant is unreachable at startup) `/sensors` says that live monitoring is still starting, cannot reach Home Assistant, cannot sign in, or is not running, and that sensor readings are not available yet. It does **not** say that nothing is shared: until Home Assistant has been read, that is unknown, and the answer is the same whether or not anything is shared. Once monitoring has synchronized, "No monitored sensors are shared with you" means exactly that.
+
+A tracked sensor that reports `unavailable` or `unknown` without a device class keeps its previous kind and is listed as not reporting; it never disappears or reads as closed, clear or dry.
+
+Supported kinds: temperature, humidity, battery level and battery low, motion, door, window and water leak.
 
 ## /status
 
@@ -42,7 +69,7 @@ Discord gateway, Home Assistant REST API (with its version) and the database. Th
 
 ## /setup
 
-Opens the setup wizard (administrators only). The wizard is private to you and resumes where you left off. See [setup.md](setup.md#configure-access-with-setup) for a walkthrough.
+Opens the setup wizard (administrators only). The wizard is private to you and resumes where you left off. See [setup.md](setup.md#5-configure-access-with-setup) for a walkthrough.
 
 | Step | What you do |
 | --- | --- |

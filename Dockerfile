@@ -18,7 +18,7 @@ FROM gcr.io/distroless/static-debian12:nonroot
 LABEL org.opencontainers.image.title="NeptHass" \
       org.opencontainers.image.description="Secure, self-hosted, Discord-first control and monitoring bridge for Home Assistant" \
       org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.source="https://github.com/JameelSawafta/nepthass"
+      org.opencontainers.image.source="https://github.com/nepthass/nepthass"
 COPY --from=build /out/nepthass /usr/local/bin/nepthass
 # Pre-create the data directory owned by the non-root user so a fresh named volume is writable.
 COPY --from=build --chown=65532:65532 /out/data /data

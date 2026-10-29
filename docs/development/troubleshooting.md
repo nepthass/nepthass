@@ -73,6 +73,12 @@ docker compose --env-file .env.dev -f compose.dev.yaml logs --tail=100 nepthass
 
 **A state wait times out.** Home Assistant is overloaded or a script failed. Look at `logs homeassistant` for script or template errors and run the reset script by hand.
 
+## Live monitoring checks
+
+- **`/health` shows reconnecting after `restart homeassistant`.** Expected. Home Assistant takes roughly 30 to 90 seconds to come back; NeptHass retries (1 s growing to 60 s) and resynchronizes by itself. If it does not recover, read the NeptHass log for the failure category.
+- **The WebSocket line says the token was rejected but REST commands work.** The token was revoked or replaced after NeptHass started. Update `HA_TOKEN` in `.env.dev` and `up -d`.
+- **The monitoring integration tests fail with "condition not reached".** They wait (without polling) for real events; make sure the simulation is at baseline (`NeptHass Dev: reset to baseline`) and that Home Assistant is healthy. They never touch your running dev stack's containers: the outage test uses an in-test TCP proxy.
+
 ## Still stuck
 
 Collect the version (`git rev-parse --short HEAD`), `docker compose version`, and the relevant log lines. Redact tokens, IDs and anything private, then open an issue. For security problems use [SECURITY.md](../../SECURITY.md) instead.

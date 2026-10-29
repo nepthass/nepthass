@@ -20,7 +20,7 @@ In Home Assistant open your profile, **Security**, **Long-Lived Access Tokens**,
 ## 3. Configure
 
 ```bash
-git clone https://github.com/JameelSawafta/nepthass.git
+git clone https://github.com/nepthass/nepthass.git
 cd nepthass
 cp .env.example .env
 chmod 600 .env
@@ -134,3 +134,11 @@ Migrations run automatically at start-up. NeptHass refuses to start on a databas
 4. Run `/setup` (to review and extend what is shared) and `/sync` (to record the baseline of known entities).
 
 The upgrade was verified on a copy of a real v0.1.0 database: permissions and audit rows were preserved, the schema went from one migration to two, and re-opening the database was a no-op.
+
+### From v0.2.0 to v0.3.0
+
+- There is **no database migration and no new setting**; the v0.2.0 database is used unchanged.
+- Rebuild and restart as usual (`git pull && docker compose up -d --build`). NeptHass now also opens a WebSocket connection to `HA_URL` (`http` becomes `ws`, `https` becomes `wss`, any path prefix is kept). It is outbound only and uses the same token.
+- If Home Assistant sits behind a reverse proxy, allow WebSocket upgrades on `/api/websocket`.
+- Run `/health`: the WebSocket line should read "Healthy" within seconds of start. Share the sensors you want people to see live (`/setup`), then try `/sensors`.
+- Live sensor state is not stored: after a restart it is empty until the first synchronization finishes.

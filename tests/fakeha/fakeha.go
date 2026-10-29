@@ -12,6 +12,7 @@ import (
 	"sort"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Call records one service call received by the server.
@@ -22,8 +23,10 @@ type Call struct {
 }
 
 type entity struct {
-	state string
-	attrs map[string]any
+	state   string
+	attrs   map[string]any
+	changed time.Time
+	updated time.Time
 }
 
 // Server is a fake Home Assistant listening on a loopback port.
@@ -34,6 +37,9 @@ type Server struct {
 	mu       sync.Mutex
 	entities map[string]entity
 	calls    []Call
+	tick     int64
+
+	ws wsState
 }
 
 // New starts a server that accepts only the given bearer token. It is closed
@@ -41,12 +47,17 @@ type Server struct {
 func New(t testing.TB, token string) *Server {
 	t.Helper()
 	s := &Server{token: token, entities: make(map[string]entity)}
+	s.ws.init()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/config", s.handleConfig)
 	mux.HandleFunc("GET /api/states", s.handleStates)
 	mux.HandleFunc("GET /api/states/{id}", s.handleState)
 	mux.HandleFunc("POST /api/services/{domain}/{service}", s.handleService)
-	s.Server = httptest.NewServer(s.authenticate(mux))
+	root := http.NewServeMux()
+	// The WebSocket endpoint authenticates inside the protocol, not with a header.
+	root.HandleFunc("GET /api/websocket", s.serveWS)
+	root.Handle("/", s.authenticate(mux))
+	s.Server = httptest.NewServer(root)
 	t.Cleanup(s.Close)
 	return s
 }
@@ -55,7 +66,27 @@ func New(t testing.TB, token string) *Server {
 func (s *Server) Set(id, state string, attrs map[string]any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.entities[id] = entity{state: state, attrs: attrs}
+	now := s.clockLocked()
+	s.entities[id] = entity{state: state, attrs: attrs, changed: now, updated: now}
+}
+
+// clockLocked returns a strictly increasing, deterministic timestamp (one
+// millisecond per call from a fixed base) so tests can reason about ordering.
+// The caller holds s.mu.
+func (s *Server) clockLocked() time.Time {
+	s.tick++
+	return time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC).Add(time.Duration(s.tick) * time.Millisecond)
+}
+
+// Object returns the state object the server currently serves for an entity
+// (nil when it does not exist), exactly as a snapshot or event would carry it.
+func (s *Server) Object(id string) map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.entities[id]; !ok {
+		return nil
+	}
+	return s.render(id)
 }
 
 // Calls returns a copy of every service call received so far.
@@ -135,13 +166,18 @@ func (s *Server) handleService(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) render(id string) map[string]any {
 	e := s.entities[id]
-	attrs := e.attrs
+	return StateObject(id, e.state, e.attrs, e.changed, e.updated)
+}
+
+// StateObject builds a Home Assistant state object as it appears in REST
+// responses, snapshots and events.
+func StateObject(id, state string, attrs map[string]any, changed, updated time.Time) map[string]any {
 	if attrs == nil {
 		attrs = map[string]any{}
 	}
 	return map[string]any{
-		"entity_id": id, "state": e.state, "attributes": attrs,
-		"last_changed": "2026-10-27T10:00:00+00:00", "last_updated": "2026-10-27T10:00:00+00:00",
+		"entity_id": id, "state": state, "attributes": attrs,
+		"last_changed": changed.Format(time.RFC3339Nano), "last_updated": updated.Format(time.RFC3339Nano),
 	}
 }
 

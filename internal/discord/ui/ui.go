@@ -73,6 +73,17 @@ func Relative(t time.Time) string {
 	return "<t:" + strconv.FormatInt(t.Unix(), 10) + ":R>"
 }
 
+// ClockTime renders a moment as the viewer's local clock time ("12:34:56 PM").
+// Use it for a future moment in a message that stays on screen: a relative
+// timestamp ("in 24 seconds") is recomputed by Discord and would read "24
+// seconds ago" once the moment has passed.
+func ClockTime(t time.Time) string {
+	if t.IsZero() {
+		return "unknown"
+	}
+	return "<t:" + strconv.FormatInt(t.Unix(), 10) + ":T>"
+}
+
 // Choice builds an autocomplete choice with a bounded name.
 func Choice(name, value string) *discordgo.ApplicationCommandOptionChoice {
 	return &discordgo.ApplicationCommandOptionChoice{Name: Truncate(name, MaxChoice), Value: value}

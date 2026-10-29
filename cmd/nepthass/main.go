@@ -19,6 +19,7 @@ import (
 	"github.com/nepthass/nepthass/internal/entities"
 	"github.com/nepthass/nepthass/internal/homeassistant/rest"
 	"github.com/nepthass/nepthass/internal/logging"
+	"github.com/nepthass/nepthass/internal/monitor"
 	"github.com/nepthass/nepthass/internal/setup"
 	"github.com/nepthass/nepthass/internal/storage"
 )
@@ -77,8 +78,13 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 	setupService := setup.NewService(setup.Deps{
 		DB: db, Store: setup.NewStore(db), Discovery: discovery, Permissions: perms, Aliases: aliases, Audit: auditLog, Now: time.Now,
 	})
+	mon, err := monitor.New(monitor.Config{HomeAssistant: cfg.HomeAssistant, Logger: log})
+	if err != nil {
+		return err
+	}
 	bot, err := discord.New(cfg.Discord, commands.Deps{
-		Entities: service, Discovery: discovery, Audit: auditLog, HA: ha, DB: db, Version: version, Logger: log,
+		Entities: service, Discovery: discovery, Monitoring: monitor.NewReader(mon, perms, aliases),
+		Audit: auditLog, HA: ha, DB: db, Version: version, Logger: log,
 	}, setupService)
 	if err != nil {
 		return err
@@ -86,10 +92,16 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	var background sync.WaitGroup
-	background.Add(1)
+	background.Add(2)
 	go func() {
 		defer background.Done()
 		auditLog.RunRetention(ctx, cfg.Database.AuditRetention, log)
+	}()
+	// The monitor is owned by the application: it stops with ctx and Run
+	// returns only after its socket is closed, so shutdown waits for it below.
+	go func() {
+		defer background.Done()
+		mon.Run(ctx)
 	}()
 	err = bot.Run(ctx)
 	cancel()
