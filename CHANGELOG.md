@@ -119,5 +119,5 @@ First milestone: the foundation.
 
 [Unreleased]: https://github.com/nepthass/nepthass/compare/v0.3.0...HEAD
 [0.3.0]: https://github.com/nepthass/nepthass/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/nepthass/nepthass/compare/a7fbdd97a3651874960dd5c08f17c5c65dca1e59...v0.2.0
-[0.1.0]: https://github.com/nepthass/nepthass/commit/a7fbdd97a3651874960dd5c08f17c5c65dca1e59
+[0.2.0]: https://github.com/nepthass/nepthass/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/nepthass/nepthass/tree/v0.1.0
