@@ -76,7 +76,7 @@ Requirements: Linux, Docker Engine with Compose, a running Home Assistant, a Dis
 3. **Collect IDs.** In Discord enable Developer Mode, then copy your server (guild) ID and your user ID.
 4. **Configure.**
    ```bash
-   git clone https://github.com/JameelSawafta/nepthass.git && cd nepthass
+   git clone https://github.com/nepthass/nepthass.git && cd nepthass
    cp .env.example .env
    # edit .env: DISCORD_BOT_TOKEN, DISCORD_APPLICATION_ID, DISCORD_GUILD_ID,
    #            DISCORD_ADMIN_USER_IDS, HA_TOKEN

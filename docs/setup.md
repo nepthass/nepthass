@@ -20,7 +20,7 @@ In Home Assistant open your profile, **Security**, **Long-Lived Access Tokens**,
 ## 3. Configure
 
 ```bash
-git clone https://github.com/JameelSawafta/nepthass.git
+git clone https://github.com/nepthass/nepthass.git
 cd nepthass
 cp .env.example .env
 chmod 600 .env

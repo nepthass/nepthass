@@ -24,6 +24,7 @@ Third milestone (in development on `feature/v0.3.0`, not released): real-time se
 
 - `gorilla/websocket` upgraded from 1.4.2 to 1.5.3 (already in the dependency graph through discordgo; no new module).
 - `/health` no longer says the WebSocket is "not available in this release".
+- The repository moved from a personal account to the `nepthass` GitHub organization (`github.com/nepthass/nepthass`). Clone URLs, the changelog compare links and the image source label now point there. The Go module path was already `github.com/nepthass/nepthass` and is unchanged. Published release notes and history keep the earlier URLs, which GitHub redirects.
 
 ### Security
 
@@ -106,6 +107,6 @@ First milestone: the foundation.
 - A single Discord guild is supported.
 - `/devices` lists 10 entities per page via a `page` option; interactive pagination arrives with the dashboard.
 
-[Unreleased]: https://github.com/JameelSawafta/nepthass/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/JameelSawafta/nepthass/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/JameelSawafta/nepthass/releases/tag/v0.1.0
+[Unreleased]: https://github.com/nepthass/nepthass/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/nepthass/nepthass/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/nepthass/nepthass/releases/tag/v0.1.0
