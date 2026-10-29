@@ -162,19 +162,48 @@ func monitoringHead(st *monitor.Status) string {
 	case st.State == monitor.StateReconnecting:
 		head := failureText(st.LastFailure)
 		if !st.NextRetryAt.IsZero() {
-			head += ", next attempt " + ui.Relative(st.NextRetryAt)
+			// A clock time, not a relative one: this message stays on screen and a
+			// relative timestamp would turn "in 24 seconds" into "24 seconds ago".
+			head += ", next attempt at " + ui.ClockTime(st.NextRetryAt)
 		}
-		if st.Tracked > 0 {
-			head += ". Last known values may be outdated"
-		}
-		return head
+		return head + outdatedNote(st)
 	case st.State == monitor.StateStopped:
 		return ui.IconDisabled + " Stopped"
 	case st.State == monitor.StateDisconnected:
 		return ui.IconDisabled + " Not started yet"
-	default:
-		return "\u23F3 Starting (" + string(st.State) + ")"
+	default: // connecting, authenticating, subscribing or synchronizing
+		return startingHead(st) + outdatedNote(st)
 	}
+}
+
+// startingHead describes a connection attempt in progress. After an earlier
+// failure it is a reconnection, never "Starting": the first start and every
+// later retry are different situations for the person reading it.
+func startingHead(st *monitor.Status) string {
+	stage := string(st.State)
+	switch {
+	case st.Reconnects == 0 && st.LastFailure == monitor.FailureNone:
+		return "\u23F3 Starting (" + stage + ")"
+	case st.State == monitor.StateConnecting && st.LastFailure == monitor.FailureAuthentication:
+		return failureText(monitor.FailureAuthentication) + " (retrying now)"
+	case st.State == monitor.StateConnecting:
+		reason := "network problem"
+		if st.LastFailure == monitor.FailureProtocol {
+			reason = "unexpected response"
+		}
+		return ui.IconWarn + " Reconnecting to Home Assistant's WebSocket (the previous attempt failed: " + reason + ")"
+	default:
+		return "\u23F3 Reconnecting (" + stage + ")"
+	}
+}
+
+// outdatedNote warns that cached values are not live while a connection is
+// being (re)established.
+func outdatedNote(st *monitor.Status) string {
+	if st.Tracked > 0 {
+		return ". Last known values may be outdated"
+	}
+	return ""
 }
 
 func failureText(f monitor.Failure) string {
