@@ -35,6 +35,10 @@ type Script struct {
 	// HoldStates makes get_states wait for ReleaseStates after capturing the
 	// snapshot, so tests can inject events between the snapshot and its delivery.
 	HoldStates bool
+	// SilentStates never answers get_states but keeps serving pings (a peer that
+	// is alive yet unresponsive to this command). Unlike HoldStates it does not
+	// block the connection's read loop.
+	SilentStates bool
 	// IgnorePing never answers ping.
 	IgnorePing bool
 	// PadSnapshotBytes inflates the get_states response (oversize tests).
@@ -403,6 +407,9 @@ func (s *Server) handleGetStates(c *wsConn, m clientMsg, script Script) {
 	gate := s.ws.gate
 	s.ws.touch()
 	s.ws.mu.Unlock()
+	if script.SilentStates {
+		return
+	}
 	if script.HoldStates {
 		<-gate
 	}

@@ -17,6 +17,15 @@ import (
 // DefaultSyncBufferMax bounds the events held while the snapshot is fetched.
 const DefaultSyncBufferMax = 4096
 
+// Defaults for how long a command may wait for its answer. A connection that
+// answers pings but never answers a command would otherwise leave the monitor
+// waiting forever, so each wait is bounded; a timeout ends the attempt and the
+// normal reconnect backoff takes over. The snapshot is larger, hence longer.
+const (
+	DefaultCommandTimeout  = 15 * time.Second
+	DefaultSnapshotTimeout = 60 * time.Second
+)
+
 // Config configures a Monitor. Only HomeAssistant is required; everything else
 // has a production default and exists so tests can be deterministic.
 type Config struct {
@@ -30,6 +39,10 @@ type Config struct {
 	// are filled in from HomeAssistant).
 	Session       ws.Options
 	SyncBufferMax int
+	// CommandTimeout bounds subscribe_events and SnapshotTimeout bounds
+	// get_states (zero selects the defaults above).
+	CommandTimeout  time.Duration
+	SnapshotTimeout time.Duration
 	// Liveness is how recent the last frame must be for the monitor to be
 	// considered healthy. It defaults to the session read timeout.
 	Liveness time.Duration
@@ -82,6 +95,12 @@ func New(cfg Config) (*Monitor, error) {
 	}
 	if cfg.SyncBufferMax <= 0 {
 		cfg.SyncBufferMax = DefaultSyncBufferMax
+	}
+	if cfg.CommandTimeout <= 0 {
+		cfg.CommandTimeout = DefaultCommandTimeout
+	}
+	if cfg.SnapshotTimeout <= 0 {
+		cfg.SnapshotTimeout = DefaultSnapshotTimeout
 	}
 	if cfg.Dial == nil {
 		cfg.Dial = ws.Dial
@@ -183,13 +202,13 @@ func (m *Monitor) runSession(ctx context.Context, readyAt *time.Time) error {
 
 	sink := newSyncSink(m, m.cfg.SyncBufferMax)
 	sess.Start(sink.handle)
-	if _, err := sess.Call(ctx, "subscribe_events", map[string]any{"event_type": "state_changed"}); err != nil {
+	if _, err := m.command(ctx, sess, m.cfg.CommandTimeout, "subscribe_events", map[string]any{"event_type": "state_changed"}); err != nil {
 		return fmt.Errorf("subscribe to state changes: %w", err)
 	}
 	m.log.Info("home assistant event subscription active")
 	m.to(StateSynchronizing, "subscribed")
 
-	raw, err := sess.Call(ctx, "get_states", nil)
+	raw, err := m.command(ctx, sess, m.cfg.SnapshotTimeout, "get_states", nil)
 	if err != nil {
 		return fmt.Errorf("fetch the state snapshot: %w", err)
 	}
@@ -210,6 +229,21 @@ func (m *Monitor) runSession(ctx context.Context, readyAt *time.Time) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// command sends one command and waits at most timeout for its answer. When the
+// deadline expires while the application is still running, the error wraps
+// context.DeadlineExceeded, which the retry loop classifies as a network
+// failure; when the application is shutting down it returns the cancellation
+// unchanged so shutdown is never mistaken for a failure.
+func (m *Monitor) command(ctx context.Context, sess *ws.Session, timeout time.Duration, typ string, params map[string]any) (json.RawMessage, error) {
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	res, err := sess.Call(cctx, typ, params)
+	if err != nil && ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+		return nil, fmt.Errorf("no answer to %s within %s: %w", typ, timeout, err)
+	}
+	return res, err
 }
 
 // process validates and applies one state_changed event. It runs on the
