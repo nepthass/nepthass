@@ -51,7 +51,7 @@ func (r *Registry) sensors(ctx context.Context, req Request) Reply {
 		return Reply{Content: "No monitored sensors are shared with you. An administrator can share a temperature, humidity, battery, motion, door, window or water-leak sensor with `/setup` or `/permissions allow`."}
 	}
 	desc, color := "", ui.ColorOK
-	if !res.Status.Healthy {
+	if !isLive(res.Status) {
 		desc = ui.IconWarn + " " + staleBanner(res.Status) + "\n\n"
 		color = ui.ColorWarn
 	}
@@ -59,8 +59,24 @@ func (r *Registry) sensors(ctx context.Context, req Request) Reply {
 		desc += sensorLine(v) + "\n"
 	}
 	e := ui.Embed("Sensors", desc, color)
-	e.Footer = &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Page %d of %d. Live readings from Home Assistant's WebSocket. Use /status for an authoritative read of one entity.", res.Page, res.Pages)}
+	e.Footer = &discordgo.MessageEmbedFooter{Text: sensorsFooter(res)}
 	return Reply{Embeds: []*discordgo.MessageEmbed{e}}
+}
+
+// isLive is the single definition of "these readings are live": the monitor is
+// healthy and its cache was synchronized. The banner and the footer both use it
+// so they can never disagree.
+func isLive(st monitor.Status) bool { return st.Healthy && st.Synchronized }
+
+// sensorsFooter calls the readings "live" only while monitoring is healthy and
+// synchronized. Otherwise the values are last known ones, and saying "live"
+// next to the stale banner would contradict it.
+func sensorsFooter(res monitor.Page) string {
+	source := "Last known values, not live (monitoring is not healthy)."
+	if isLive(res.Status) {
+		source = "Live readings from Home Assistant's WebSocket."
+	}
+	return fmt.Sprintf("Page %d of %d. %s Use /status for an authoritative read of one entity.", res.Page, res.Pages, source)
 }
 
 // notSynchronizedText explains why there is nothing to show before the first
