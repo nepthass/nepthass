@@ -982,3 +982,16 @@ func TestEngine_aFailedReloadKeepsThePreviousConfiguration_isDegraded_andTheWatc
 		t.Errorf("the watcher must retry until the saved configuration is active again: %+v", h)
 	}
 }
+
+func TestEngine_theSameTransitionDeliveredTwiceBeforeEvaluationAlertsOnce(t *testing.T) {
+	e := newEF(t, nil)
+	e.configure()
+	e.addRule(door, monitor.CategoryDoor, KindState, nil, dur(0))
+	c := e.change(door, monitor.CategoryDoor, "off", "on", monitor.SourceLive)
+	e.emit(c, c) // a duplicate of the very same change
+	e.eval()
+	e.flush()
+	if len(e.sent()) != 1 {
+		t.Errorf("a duplicate delivery must not alert twice: %d", len(e.sent()))
+	}
+}

@@ -753,3 +753,50 @@ func TestE2E_configurationSurvivesARestart_andTheExistingStateStaysSilent(t *tes
 		t.Errorf("an already-open door is silent after a restart and only the real transition alerts: %d", n)
 	}
 }
+
+func TestE2E_aRealRateLimitIsWaitedOutAndTheAlertIsDeliveredOnce_withoutCountingAsAFailure(t *testing.T) {
+	a := newAFix(t, true, nil)
+	a.ready("binary_sensor.door", monitor.CategoryDoor)
+	if _, err := a.admin.SetChannel(ctx0, adminActor, stubChannel); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.admin.AddRule(ctx0, adminActor, notify.NewRule{Entity: "binary_sensor.door", Kind: notify.KindState, Cooldown: zero()}); err != nil {
+		t.Fatal(err)
+	}
+	a.stub.reply = func(n int) *stubReply {
+		if n == 1 {
+			return &stubReply{429, `{"message":"You are being rate limited.","retry_after":2,"global":false}`}
+		}
+		return nil
+	}
+	cancel, done := a.run()
+	defer func() { cancel(); <-done }()
+	a.clk.await(t, 1)
+	a.eng.OnChange(a.change("binary_sensor.door", "off", "on", monitor.SourceLive))
+	a.stub.waitPosts(1) // Discord answers 429
+	a.clk.await(t, 2)   // the watcher's tick and the dispatcher waiting out the rate limit
+	if n := len(a.stub.postsSnapshot()); n != 1 {
+		t.Fatalf("the alert must wait for Discord's retry_after, not retry at once: %d requests", n)
+	}
+	a.clk.Advance(30 * time.Second)
+	a.stub.waitPosts(2)
+	pollUntil(t, "the alert to be delivered", func() bool { return a.eng.Health().Delivered == 1 })
+	if h := a.eng.Health(); h.Retried != 0 || h.DroppedTTL != 0 || h.BreakerOpen || h.Degraded {
+		t.Errorf("a 429 is waited out: it is not a failure, a retry count, a loss or a breaker event: %+v", h)
+	}
+	if n := len(a.stub.postsSnapshot()); n != 2 {
+		t.Errorf("exactly one retry: %d requests", n)
+	}
+}
+
+func pollUntil(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.After(stubWait)
+	for !cond() {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for %s", what)
+		case <-time.After(time.Millisecond): // poll an in-process counter without burning the CPU quota
+		}
+	}
+}

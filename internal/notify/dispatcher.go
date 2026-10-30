@@ -154,9 +154,6 @@ func (d *dispatcher) process(waitCtx, sendCtx context.Context, it item, draining
 	case now.After(it.deadline):
 		d.drop(it, dropTTL)
 		return
-	case !d.br.allow(now):
-		d.drop(it, dropBreaker)
-		return
 	}
 	it, v := d.recheck(sendCtx, it)
 	switch v {
@@ -165,6 +162,13 @@ func (d *dispatcher) process(waitCtx, sendCtx context.Context, it item, draining
 		return
 	case verdictRetry:
 		d.retryLater(it, now, draining)
+		return
+	}
+	// Asked only now: when the breaker is open and its probe interval has passed,
+	// allow takes the single probe slot, so a message that is revoked or whose
+	// permission could not be read must not be the one to consume it.
+	if !d.br.allow(now) {
+		d.drop(it, dropBreaker)
 		return
 	}
 	if w := d.bucket.wait(now); w > 0 {

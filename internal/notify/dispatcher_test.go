@@ -434,3 +434,23 @@ func TestDispatcher_doesNotSleepThroughAWakeUpTimeThatPassedWhileItRegisteredIts
 	f.clk.Advance(time.Hour) // releases the shutdown drain timer
 	<-done
 }
+
+func TestDispatcher_aRevokedMessageDoesNotConsumeTheBreakersOnlyProbe(t *testing.T) {
+	f := newDFix(nil)
+	f.acc.set("door.b", entities.AccessRead)
+	f.snd.script = func(int, Message) error { return Permanent(errors.New("missing access")) }
+	for i := 0; i < 3; i++ {
+		f.process(f.alert("door.a", monitor.CategoryDoor))
+	}
+	if !f.d.br.isOpen() {
+		t.Fatal("three permanent failures open the breaker")
+	}
+	f.clk.Advance(time.Minute) // the probe interval has passed: exactly one send may probe
+	f.snd.script = nil
+	f.acc.set("door.a", entities.AccessNone)
+	f.process(f.alert("door.a", monitor.CategoryDoor)) // revoked: it is dropped without sending
+	f.process(f.alert("door.b", monitor.CategoryDoor)) // this one must get the probe
+	if got := len(f.snd.messages()); got != 4 || f.d.br.isOpen() || f.m.delivered.Load() != 1 {
+		t.Errorf("the probe must go to a message that is really sent: sends=%d open=%v delivered=%d", got, f.d.br.isOpen(), f.m.delivered.Load())
+	}
+}

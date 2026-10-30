@@ -280,3 +280,35 @@ func TestNotifier_validatesRoleAndOverwriteCombinations(t *testing.T) {
 		})
 	}
 }
+
+func TestNotifier_hostileSensorNamesCannotMentionAnyone_inAlertsOrDigests(t *testing.T) {
+	hostile := []string{"@everyone", "@here", "<@123456789012345678>", "<@&123456789012345678>", "<#123456789012345678>", "@everyone <@&1> **bold** [x](http://evil.example)"}
+	f := newNFix(t, true)
+	for _, name := range hostile {
+		if err := f.n.Send(bg, door(name)); err != nil {
+			t.Fatal(err)
+		}
+		digest := notify.Message{Kind: notify.MsgDigest, Lines: []notify.DigestLine{{Name: name, Trigger: notify.KindState, Meaning: monitor.MeaningOpen}}}
+		if err := f.n.Send(bg, digest); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, p := range f.stub.postsSnapshot() {
+		content, _ := p.Body["content"].(string)
+		for j := 0; j < len(content); j++ {
+			if (content[j] == '@' || content[j] == '[') && (j == 0 || content[j-1] != '\\') {
+				t.Fatalf("post %d contains an unescaped %c: %q", i, content[j], content)
+			}
+		}
+		if strings.Contains(content, "<@") || strings.Contains(content, "<#") {
+			t.Errorf("post %d keeps a live mention, channel link or markdown link: %q", i, content)
+		}
+		am, _ := p.Body["allowed_mentions"].(map[string]any)
+		if parse, ok := am["parse"].([]any); !ok || len(parse) != 0 {
+			t.Errorf("post %d must send an empty allowed_mentions list: %+v", i, p.Body["allowed_mentions"])
+		}
+	}
+	if n := len(f.stub.postsSnapshot()); n != 2*len(hostile) {
+		t.Errorf("every message was sent: %d", n)
+	}
+}
