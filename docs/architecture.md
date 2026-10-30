@@ -141,6 +141,7 @@ Discord roles and channel permissions play no part in *who may use commands*. Th
 - **REST** is authoritative for commands: one request per use, redirects never followed, a service allowlist inside the client. It never depends on the WebSocket, so commands keep working while monitoring is down.
 - **WebSocket** feeds live state: one session, `subscribe_events` for `state_changed`, buffered events replayed after an authoritative `get_states` snapshot on every (re)connect, health reported as five separate facts. Home Assistant does not replay missed events; NeptHass never invents them and finds what changed while disconnected through the snapshot. Details: [design/sensor-monitoring.md](design/sensor-monitoring.md).
 - `Tracker` keeps the latest state of every classified `sensor` and `binary_sensor` in memory only (nothing is written to SQLite).
+- **Classification.** A sensor is classified only by its domain and `device_class` (never by entity-ID text) using a closed table of eight classes in `internal/monitor/classify.go`; a state is interpreted per category in `meaning.go` (`on` means open, detected, wet or low). An unknown class is not monitored and cannot be used in rules, but the entity can still be shared and read with `/status`. The verified inventory, and the typed capability registry planned to replace the per-category switches, are in [design/rules-v0.5.0.md](design/rules-v0.5.0.md#3-how-sensor-support-works-today-audit).
 
 ## Entities, sharing, permissions and aliases
 
@@ -235,3 +236,4 @@ Leave alone without evidence that it is wrong: the mailbox, the two lanes, the d
 6. Alert-channel validation uses discordgo's session state first; the bot connects with the `Guilds` intent only, so changes to the bot's own roles may not reach the cache until a restart. A failed send still surfaces the real problem.
 7. A non-administrator's refused command is not audited by the command gate (for any administrator command).
 8. `Notifier.Send` reads the notification settings from SQLite on every send.
+9. Sensor classification knowledge is spread over `monitor`, `notify` and `discord` (about ten per-category switches), "critical" is a hardcoded comparison with the leak category, and units are stored but never validated. A typed capability registry is planned ([design/rules-v0.5.0.md](design/rules-v0.5.0.md)).

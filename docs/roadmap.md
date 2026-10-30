@@ -18,15 +18,23 @@ NeptHass is developed in small milestones. Each one is released only when it is 
 | v0.3.0 | Home Assistant WebSocket, real-time sensor monitoring, reconnection and reconciliation |
 | v0.4.0 | Smart notifications: rules, cooldowns, one alert channel, monitoring-down notices |
 
-## Next: v0.5.0 (proposed)
+## Next: v0.5.0 (design approved)
 
-**Theme: richer notification rules.** The proposal is to add **duration rules** ("the door has been open for 10 minutes") and **hysteresis** (a separate recovery threshold for numeric rules), plus a few small hardening items found while reviewing v0.4.0. It is a proposal, not a commitment: see the [design proposal](design/rules-v0.5.0.md) for the reasoning, the alternatives that were considered, and the task breakdown.
+**Theme: richer rules and safer start-up.** The five architecture decisions are approved and the [design](design/rules-v0.5.0.md) is written; implementation has not started. The milestone covers:
+
+- **Duration rules** ("the door has been open for 10 minutes") and **hysteresis** (a separate recovery threshold), with numeric thresholds bound to the sensor's unit so a unit change cannot cause false alerts.
+- **Initial-state alerting.** A critical hazard (water leak) that is already detected when NeptHass starts alerts immediately; other sensors already in an alert state are summarized once; duplicates across restarts are suppressed.
+- **Audit of unauthorized administrative command attempts.**
+- **A small typed sensor capability registry** that replaces the per-category switches spread over three packages (a prerequisite for the features above).
+
+Not in v0.5.0: smoke, gas and carbon monoxide alerts (they need a deliberate safety decision first), quiet hours and a persisted outbox.
 
 ## Under evaluation (not scheduled)
 
-- **Quiet hours.** Suppress non-critical alerts during chosen hours, with critical alerts (water leak, monitoring down) exempt. It needs a time-zone and daylight-saving design and a decision about suppression versus deferral; the notes are in the proposal.
-- **Delivery reliability.** A persisted outbox would survive restarts but changes the delivery model (at-least-once, deduplication, new write path). It is only worth doing with evidence that restart losses matter in practice.
-- **Per-rule alert channels, notification history, configurable staleness bound.**
+- **More sensor types.** Garage door, opening, occupancy, power, air quality and others are one registry row each once the registry exists. A declarative JSON catalog was evaluated and is **not planned**: a typed Go registry is simpler and keeps the safety properties beside the engine.
+- **Quiet hours.** Suppress non-critical alerts during chosen hours, with critical alerts exempt. It needs a time-zone and daylight-saving design and a decision about suppression versus deferral; the notes are in the design.
+- **Delivery reliability.** A persisted outbox would survive restarts but changes the delivery model; it is only worth doing with evidence that restart losses matter in practice.
+- **Per-rule alert channels, notification history, a configurable staleness bound.**
 
 ## Later
 

@@ -81,7 +81,7 @@ An alert needs a **qualifying transition**: the sensor was last seen reliably no
 - `unavailable`, `unknown` and unparseable readings are unreliable. They neither re-arm nor fire a rule, with one exception: **a leak sensor that goes from unavailable or unknown to wet alerts**, marked as uncertain ("its state was unknown before, please check it"). A missed leak is judged worse than a possibly redundant one.
 - A change found by a **snapshot after a reconnect** alerts and is marked late ("detected after NeptHass reconnected, it may have happened earlier").
 
-**Initial snapshot limitation.** Because a first observation is silent, a leak that is already wet when NeptHass starts, or when the rule is created, is not announced. NeptHass tells you when it changes, not what already was. Use `/sensors` to see the current state.
+**Initial snapshot limitation.** Because a first observation is silent, a leak that is already wet when NeptHass starts, or when the rule is created, is not announced. NeptHass tells you when it changes, not what already was. Use `/sensors` to see the current state. The approved v0.5.0 design replaces this behavior for critical hazards and adds a one-time start-up summary for the rest: see [initial-state alerting](rules-v0.5.0.md#10-initial-state-alerting-d5).
 
 ### Cooldown
 
