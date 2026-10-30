@@ -17,10 +17,20 @@ NeptHass is being built milestone by milestone. v0.1.0 (Foundation) and v0.2.0 (
 | v0.1.0 | Foundation: configuration, Discord connection, Home Assistant REST client, SQLite, authorization, basic commands, Docker | **Implemented** |
 | v0.2.0 | Interactive `/setup` wizard, entity discovery, aliases, persistent setup sessions, `/sync` | **Implemented** |
 | v0.3.0 | Home Assistant WebSocket, real-time sensor monitoring, reconnection and reconciliation | **Released** |
-| v0.4.0 | Smart notifications (motion, door/window, leak, battery), cooldowns, outbox | Planned |
+| v0.4.0 | Smart notifications (motion, door/window, leak, battery, temperature, humidity), cooldowns, monitoring-down notices | **Released** |
 | v0.5.0 | Rules engine: thresholds, durations, quiet hours, hysteresis | Planned |
 | v0.6.0 | Interactive `/home` dashboard | Planned |
 | v1.0.0 | Stable release: hardening, release workflow, full docs | Planned |
+
+### What v0.4.0 adds
+
+- **Discord alerts** for shared sensors, sent to one administrator-chosen text channel: a door or window opens, motion is detected, a leak sensor gets wet, a battery is low, or a temperature, humidity or battery level goes above or below a threshold.
+- `/notifications` (administrators, guild-only): `channel`, `add`, `list`, `pause`, `resume`, `remove`, `test` and `status`. Up to 200 rules; per-rule cooldowns with sensible defaults (door 1 min, motion 5 min, leak and temperature 15 min, battery 6 h).
+- **Honest semantics:** a first observation never alerts, late alerts after a reconnect are marked as late, a leak that comes back wet from `unavailable` alerts and is marked uncertain, and a message is dropped (and counted) rather than sent after 10 minutes or after the sensor stopped being shared. No mention or ping is ever sent.
+- **Monitoring-down notices:** one alert after five continuous minutes without live monitoring, and a recovery notice once that alert was delivered.
+- **Best effort, not an alarm:** delivery is best-effort with bounded staleness and possible duplicates. Pending alerts are kept in memory only (there is **no persisted outbox**), so a crash or restart loses what was queued. Lost alerts are reconciled with one digest of the *current* state.
+- Notification health in `/health` and `/notifications status`. Everyone who can read the alert channel sees the alerts, so use a private channel. Design and guarantees: [docs/design/notifications.md](docs/design/notifications.md); commands: [docs/commands.md](docs/commands.md).
+- **Upgrading:** migration 0003 adds two tables. Back up the database first; a v0.3.0 binary refuses a database that has been upgraded (restore the backup to go back).
 
 ### What v0.3.0 adds
 
@@ -30,7 +40,7 @@ NeptHass is being built milestone by milestone. v0.1.0 (Foundation) and v0.2.0 (
 - `/sensors`: live, interpreted readings of the sensors shared with you (`on` for a door means *open*, for motion *detected*), clearly marked as stale when monitoring is down. Access is re-checked on every read, so revoking a share takes effect immediately.
 - Live state is kept in memory only: no new tables, no migration, no new settings.
 
-Monitoring **observes only**: it sends no notifications and has no rules; those are v0.4.0 and v0.5.0. Details: [docs/design/sensor-monitoring.md](docs/design/sensor-monitoring.md).
+Monitoring itself **observes only**; notifications are a separate layer added in v0.4.0, and rules are v0.5.0. Details: [docs/design/sensor-monitoring.md](docs/design/sensor-monitoring.md).
 
 ### What v0.2.0 adds
 
@@ -55,7 +65,7 @@ Details: [docs/commands.md](docs/commands.md), [docs/design/interactive-setup.md
 
 ### What does not exist yet
 
-No alerts or notifications (monitoring only observes: it never messages anyone), no rules, no `/home` dashboard, no `/alerts` or `/settings` commands. Discord notifications, when they arrive, will be best-effort and must not be relied on as an emergency alarm. The setup wizard is covered by automated tests (simulated Discord interactions against a real Home Assistant) and was checked by the maintainer on a live Discord server; those manual results are user-reported and listed in [docs/development/smoke-tests.md](docs/development/smoke-tests.md).
+No rules engine (durations, quiet hours, hysteresis and rule logic: v0.5.0), no `/home` dashboard, no `/alerts` or `/settings` commands, no persisted notification outbox and no notification history. Notifications are best-effort with possible duplicates and are not a certified alarm system; see [docs/design/notifications.md](docs/design/notifications.md).
 
 ## How it works
 

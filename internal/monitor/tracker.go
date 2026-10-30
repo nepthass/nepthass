@@ -72,6 +72,9 @@ type Counters struct {
 type Tracker struct {
 	mu      sync.RWMutex
 	sensors map[entities.ID]Sensor
+	// seq numbers the changes handed out by applyChange and reconcileChanges, in
+	// the order the tracker was mutated. Guarded by mu.
+	seq uint64
 
 	applied, duplicates, stale, removed, dropped atomic.Uint64
 }
@@ -113,53 +116,83 @@ func sameObservation(s Sensor, u Update) bool {
 
 // Apply merges one validated update using the ordering rules.
 func (t *Tracker) Apply(u Update, now time.Time) Result {
+	res, _, _ := t.apply(SourceLive, u, now, false)
+	return res
+}
+
+// applyChange is Apply that also returns the Change the update caused. The
+// Change is built under the tracker lock, so its Seq follows the mutation order,
+// and is returned to the caller to deliver after the lock is released. The bool
+// is false when the update changed nothing (duplicate, stale, dropped, untracked).
+func (t *Tracker) applyChange(src ChangeSource, u Update, now time.Time) (Result, Change, bool) {
+	return t.apply(src, u, now, true)
+}
+
+// apply is the single implementation behind Apply and applyChange. With emit
+// false no Change is built and no sequence number is consumed.
+func (t *Tracker) apply(src ChangeSource, u Update, now time.Time, emit bool) (Result, Change, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	cur, exists := t.sensors[u.ID]
 	if exists {
 		u = retainClass(cur, u)
 	}
-
 	switch {
 	case u.Removed:
 		if !exists {
-			return Result{Outcome: OutcomeUntracked}
+			return Result{Outcome: OutcomeUntracked}, Change{}, false
 		}
 		if !u.PrevUpdated.IsZero() && u.PrevUpdated.Before(cur.LastUpdated) {
 			t.stale.Add(1)
-			return Result{Outcome: OutcomeStale}
+			return Result{Outcome: OutcomeStale}, Change{}, false
 		}
-		return t.remove(u.ID)
+		res := t.remove(u.ID)
+		ch, ok := t.changeLocked(emit, src, u.ID, true, cur, Sensor{}, true, now)
+		return res, ch, ok
 	case u.Category == "":
 		// Not a class we monitor (or its class changed): stop tracking it.
 		if exists {
-			return t.remove(u.ID)
+			res := t.remove(u.ID)
+			ch, ok := t.changeLocked(emit, src, u.ID, true, cur, Sensor{}, true, now)
+			return res, ch, ok
 		}
-		return Result{Outcome: OutcomeUntracked}
+		return Result{Outcome: OutcomeUntracked}, Change{}, false
 	case !exists:
 		if len(t.sensors) >= MaxTracked {
 			t.dropped.Add(1)
-			return Result{Outcome: OutcomeDropped}
+			return Result{Outcome: OutcomeDropped}, Change{}, false
 		}
-		t.sensors[u.ID] = newSensor(u, now, 1)
+		s := newSensor(u, now, 1)
+		t.sensors[u.ID] = s
 		t.applied.Add(1)
-		return Result{Outcome: OutcomeApplied, ValueChanged: true}
+		ch, ok := t.changeLocked(emit, src, u.ID, false, Sensor{}, s, false, now)
+		return Result{Outcome: OutcomeApplied, ValueChanged: true}, ch, ok
 	}
-
 	switch u.LastUpdated.Compare(cur.LastUpdated) {
 	case -1:
 		t.stale.Add(1)
-		return Result{Outcome: OutcomeStale}
+		return Result{Outcome: OutcomeStale}, Change{}, false
 	case 0:
 		if sameObservation(cur, u) {
 			t.duplicates.Add(1)
-			return Result{Outcome: OutcomeDuplicate}
+			return Result{Outcome: OutcomeDuplicate}, Change{}, false
 		}
 	}
 	next := newSensor(u, now, cur.Revision+1)
 	t.sensors[u.ID] = next
 	t.applied.Add(1)
-	return Result{Outcome: OutcomeApplied, ValueChanged: cur.Raw != u.Raw}
+	ch, ok := t.changeLocked(emit, src, u.ID, true, cur, next, false, now)
+	return Result{Outcome: OutcomeApplied, ValueChanged: cur.Raw != u.Raw}, ch, ok
+}
+
+// changeLocked numbers and builds a Change. The caller holds t.mu. It returns
+// false, and consumes no sequence number, when emission was not requested.
+func (t *Tracker) changeLocked(emit bool, src ChangeSource, id entities.ID, hadPrev bool, prev, cur Sensor, removed bool, now time.Time) (Change, bool) {
+	if !emit {
+		return Change{}, false
+	}
+	t.seq++
+	return Change{ID: id, Seq: t.seq, Source: src, HadPrev: hadPrev, Prev: prev, Cur: cur, Removed: removed, At: now}, true
 }
 
 func (t *Tracker) remove(id entities.ID) Result {
@@ -185,10 +218,25 @@ type Reconciled struct {
 // Assistant restart cannot leave a value stuck) and sensors that are not in it
 // are removed. Updates for unclassified entities are skipped.
 func (t *Tracker) Reconcile(snapshot []Update, now time.Time) Reconciled {
+	r, _ := t.reconcile(snapshot, now, false)
+	return r
+}
+
+// reconcileChanges is Reconcile that also returns what it changed, as
+// SourceSnapshot changes in a deterministic order: additions and updates in
+// snapshot order, then removals in entity ID order. Unchanged sensors produce
+// nothing. The slice is built under the tracker lock; the caller delivers it
+// after the lock is released.
+func (t *Tracker) reconcileChanges(snapshot []Update, now time.Time) (Reconciled, []Change) {
+	return t.reconcile(snapshot, now, true)
+}
+
+func (t *Tracker) reconcile(snapshot []Update, now time.Time, emit bool) (Reconciled, []Change) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	next := make(map[entities.ID]Sensor, len(snapshot))
 	var r Reconciled
+	var changes []Change
 	for _, u := range snapshot {
 		prev, existed := t.sensors[u.ID]
 		if existed {
@@ -206,27 +254,45 @@ func (t *Tracker) Reconcile(snapshot []Update, now time.Time) Reconciled {
 		}
 		switch {
 		case !existed:
-			next[u.ID] = newSensor(u, now, 1)
+			s := newSensor(u, now, 1)
+			next[u.ID] = s
 			r.Added++
+			if ch, ok := t.changeLocked(emit, SourceSnapshot, u.ID, false, Sensor{}, s, false, now); ok {
+				changes = append(changes, ch)
+			}
 		case sameObservation(prev, u):
 			prev.ObservedAt = now
 			next[u.ID] = prev
 			r.Unchanged++
 		default:
-			next[u.ID] = newSensor(u, now, prev.Revision+1)
+			s := newSensor(u, now, prev.Revision+1)
+			next[u.ID] = s
 			r.Updated++
+			if ch, ok := t.changeLocked(emit, SourceSnapshot, u.ID, true, prev, s, false, now); ok {
+				changes = append(changes, ch)
+			}
 		}
 	}
+	var gone []entities.ID
 	for id := range t.sensors {
 		if _, kept := next[id]; !kept {
 			r.Removed++
+			if emit {
+				gone = append(gone, id)
+			}
+		}
+	}
+	slices.Sort(gone) // map order is random; the change order must not be
+	for _, id := range gone {
+		if ch, ok := t.changeLocked(emit, SourceSnapshot, id, true, t.sensors[id], Sensor{}, true, now); ok {
+			changes = append(changes, ch)
 		}
 	}
 	t.sensors = next
 	t.applied.Add(uint64(r.Added + r.Updated))
 	t.removed.Add(uint64(r.Removed))
 	t.dropped.Add(uint64(r.Dropped))
-	return r
+	return r, changes
 }
 
 // Get returns a copy of one sensor.

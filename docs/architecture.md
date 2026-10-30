@@ -60,7 +60,7 @@ Migrations are embedded from `migrations/`, applied in order inside transactions
 | `known_entities` | minimal /sync registry: entity ID, domain, first/last seen, missing since (v0.2.0) |
 | `schema_migrations` | applied migrations and checksums |
 
-Each package owns the SQL for its own table. Timestamps are fixed-width UTC text so they sort chronologically. The database runs in WAL mode with foreign keys on and a 5 second busy timeout; the file is created with owner-only permissions. Tables for later milestones (subscriptions, rules, outbox) are added by those milestones' migrations, not before. Migration 0002 only adds tables, so a v0.1.0 database upgrades in place with its permissions and audit log intact; the design notes are in [design/interactive-setup.md](design/interactive-setup.md).
+Each package owns the SQL for its own table. Timestamps are fixed-width UTC text so they sort chronologically. The database runs in WAL mode with foreign keys on and a 5 second busy timeout; the file is created with owner-only permissions. Tables for later milestones are added by those milestones' migrations, not before: migration 0003 (v0.4.0) adds only `notification_settings` and `notification_rules`, and there is deliberately **no outbox table**, because pending notifications are held in memory only (see [design/notifications.md](design/notifications.md)). Migration 0002 only adds tables, so a v0.1.0 database upgrades in place with its permissions and audit log intact; the design notes are in [design/interactive-setup.md](design/interactive-setup.md).
 
 ## Failure handling
 
@@ -102,3 +102,7 @@ The full design, protocol and rationale are in [design/sensor-monitoring.md](des
 - `Tracker` keeps the latest state of every classified `sensor`/`binary_sensor` (temperature, humidity, battery, motion, door, window, water leak, battery low) in memory only: duplicates and stale events are dropped, memory is bounded, nothing is written to SQLite and there is no migration.
 - `Reader` is the only way monitored data reaches a Discord user. It re-checks the caller's level and the entity's *current* permission on every read, so the cache grants nothing and revocation is immediate. `/sensors` and the `/health` monitoring line are built on it.
 - Dependency direction: `discord/commands -> monitor -> {entities, auth, config, homeassistant/ws}`. `monitor` knows nothing about Discord.
+
+## Notifications (v0.4.0)
+
+`internal/notify` turns the monitor's ordered change feed into alerts: a per-entity mailbox fed by `Config.OnChange` (no I/O in the callback), an evaluator, two bounded delivery lanes, and a dispatcher that talks to a transport-neutral `Sender`. `internal/discord` supplies the Discord REST sender, channel validation and the `/notifications` command; `cmd/nepthass` wires them (monitor, then engine, then bot) and joins the engine at shutdown. Configuration lives in two SQLite tables (migration 0003); queues and cooldown state are in memory only. Full design and guarantees: [design/notifications.md](design/notifications.md).
