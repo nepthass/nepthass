@@ -1,0 +1,47 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Do not report security problems here**: follow [SECURITY.md](../blob/main/SECURITY.md).
+        Redact tokens, Discord IDs and entity names you consider private.
+  - type: input
+    id: version
+    attributes:
+      label: NeptHass version
+      description: Output of `nepthass version`, or the release tag or commit you built.
+    validations:
+      required: true
+  - type: input
+    id: deployment
+    attributes:
+      label: How you deploy it
+      description: For example Docker Compose with the root compose.yaml, bridge network, Home Assistant version.
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: Use LOG_LEVEL=debug if needed. NeptHass never logs tokens, but check before pasting.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked docs/troubleshooting.md
+        - label: This is not a security vulnerability, and I removed secrets and private IDs
+          required: true

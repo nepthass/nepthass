@@ -49,7 +49,7 @@ NeptHass sits between a chat platform and your home, so it is deny-by-default an
 
 - Alias uniqueness is case-insensitive but not confusable-aware: visually similar characters from different scripts count as different aliases.
 - Discord shows entity names and states to Discord; the wizard's ephemeral messages are private to the administrator but not end-to-end encrypted.
-- Automated tests drive the wizard with simulated Discord interactions and a real Home Assistant. The maintainer also reported passing manual checks on a live Discord server (user-reported, recorded in [development/smoke-tests.md](development/smoke-tests.md)); the automated suite itself never talks to Discord.
+- Automated tests drive the wizard with simulated Discord interactions and a real Home Assistant. The automated suite itself never talks to Discord; live Discord behavior is covered by the manual checklist in [development/smoke-tests.md](development/smoke-tests.md).
 
 ## Live monitoring (v0.3.0)
 
@@ -80,4 +80,4 @@ Follow [SECURITY.md](../SECURITY.md). Please do not open public issues for secur
 
 ## Security review status
 
-The controls above are covered by automated tests (authorization matrix, domain allowlist, permission tampering, redaction, redirect handling, and for v0.2.0 session ownership, replay and concurrency, stale confirmations, forged selections, rollback, alias rules and escaping). For v0.2.0, 16 deliberate regressions of these controls were injected one at a time and each was caught by the test suite. No independent external audit has been performed; a dedicated review is part of the v1.0.0 milestone.
+The controls above are covered by automated tests (authorization matrix, domain allowlist, permission tampering, redaction, redirect handling, and for v0.2.0 session ownership, replay and concurrency, stale confirmations, forged selections, rollback, alias rules and escaping). For v0.2.0, 16 deliberate regressions of these controls were injected one at a time and each was caught by the test suite; the same exercise was repeated for v0.3.0 (29) and v0.4.0 (48, across the change feed, configuration, engine, Discord delivery and hardening), as recorded in the release notes. For v0.4.0 the controls include administrator-only configuration, sharing re-checked before every send, mention suppression, audit of configuration changes, and authorization through the real interaction path. No independent external audit has been performed; a dedicated review is part of the v1.0.0 milestone.

@@ -47,7 +47,7 @@ Fourth milestone: smart notifications.
 - There is **no persisted outbox**: queued alerts are lost on a crash or restart. Delivery is best-effort with possible duplicates and a 10 minute TTL.
 - A first observation is silent, so a leak that is already wet when NeptHass starts or when its rule is created is not announced.
 - One alert channel per server; no direct messages, quiet hours or rule logic (v0.5.0).
-- Real Discord was exercised manually by the maintainer on a test server (user-reported and partial, see [docs/development/smoke-tests.md](docs/development/smoke-tests.md)). Not exercised against real Discord: an actual HTTP 429, a Discord-only outage and a second user; those are covered by stub-server tests. The v0.3.0 to v0.4.0 downgrade test is deferred while the project is in private pre-v1.0.0 development.
+- Real Discord was exercised manually by the maintainer on a test server (partial; see the [known gaps](docs/development/smoke-tests.md#known-gaps)). Not exercised against real Discord: an actual HTTP 429, a Discord-only outage and a second user; those are covered by stub-server tests. The v0.3.0 to v0.4.0 downgrade test is deferred while the project is in private pre-v1.0.0 development.
 - A non-administrator's refused `/notifications` command is not audited (the command gate does not audit refusals for any administrator command).
 
 ## [0.3.0] - 2026-10-29

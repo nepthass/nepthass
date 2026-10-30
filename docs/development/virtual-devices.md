@@ -131,9 +131,9 @@ NeptHass's monitor receives every state change of these entities over the WebSoc
 
 The automated integration tests use exactly these scripts (`tests/integration/monitor_test.go`). Monitoring only observes: nothing is sent to Discord when these change; notifications arrive in v0.4.0.
 
-## Triggers for the upcoming milestones
+## Triggers for notifications and rules
 
-These are the situations the monitoring milestones react to. v0.3.0 (real-time monitoring) observes all of them live; v0.4.0 (notifications) will turn some of them into messages and does not exist yet.
+These are the situations monitoring observes and notifications (v0.4.0) react to. Live monitoring sees all of them; notification rules turn many of them into Discord alerts (see group I of [smoke-tests.md](smoke-tests.md)). Rules that depend on time or on a recovery band (durations and hysteresis) are planned: see the [roadmap](../roadmap.md).
 
 | To trigger | Do this | Entity transition |
 | --- | --- | --- |
@@ -150,7 +150,7 @@ These are the situations the monitoring milestones react to. v0.3.0 (real-time m
 | Recovery from unavailable | turn the helper off again | `unavailable` to the real value |
 | Home Assistant connection loss | `docker compose --env-file .env.dev -f compose.dev.yaml stop homeassistant`, later `start homeassistant` | REST API unreachable, then back |
 
-Three details matter for the monitoring milestones:
+Three details matter for monitoring and notifications:
 
 - `unavailable` and `unknown` are never "safe" or "inactive"; the offline helpers give you a reliable way to exercise that rule.
 - After an HA restart every helper returns to its baseline, which is a handy way to test reconciliation after reconnect without generating real alerts.
