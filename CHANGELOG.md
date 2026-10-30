@@ -6,7 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-Fourth milestone: smart notifications (`feature/v0.4.0`, not released).
+## [0.4.0] - 2026-10-30
+
+Fourth milestone: smart notifications.
 
 ### Added
 
@@ -22,8 +24,12 @@ Fourth milestone: smart notifications (`feature/v0.4.0`, not released).
 ### Changed
 
 - The recovery notice is queued ahead of the late alerts found by the reconnect snapshot.
-- Rejected, denied and test actions of `/notifications` are audited with fixed sentinel wording only.
+- A rejected channel, the outcome of `/notifications test` and any denial that reaches the notification service are audited with fixed sentinel wording only. A non-administrator is refused earlier by the command gate, which does not audit refusals (as for every administrator command).
 - A configuration change that is saved but could not be loaded into the running engine is reported as "saved but not active", shows degraded health, and is retried automatically; health never reports "disabled" in that state.
+
+### Fixed
+
+- The notification dispatcher no longer sleeps through a wake-up time that passes while it registers its idle timer (found by stress testing), and the circuit breaker's single probe slot is no longer consumed by a message that is revoked or whose permission could not be read.
 
 ### Security
 
@@ -41,7 +47,8 @@ Fourth milestone: smart notifications (`feature/v0.4.0`, not released).
 - There is **no persisted outbox**: queued alerts are lost on a crash or restart. Delivery is best-effort with possible duplicates and a 10 minute TTL.
 - A first observation is silent, so a leak that is already wet when NeptHass starts or when its rule is created is not announced.
 - One alert channel per server; no direct messages, quiet hours or rule logic (v0.5.0).
-- Delivery to real Discord has not been tested against a live server: see the pending checklist in [docs/development/smoke-tests.md](docs/development/smoke-tests.md).
+- Real Discord was exercised manually by the maintainer on a test server (user-reported and partial, see [docs/development/smoke-tests.md](docs/development/smoke-tests.md)). Not exercised against real Discord: an actual HTTP 429, a Discord-only outage and a second user; those are covered by stub-server tests. The v0.3.0 to v0.4.0 downgrade test is deferred while the project is in private pre-v1.0.0 development.
+- A non-administrator's refused `/notifications` command is not audited (the command gate does not audit refusals for any administrator command).
 
 ## [0.3.0] - 2026-10-29
 
@@ -154,7 +161,8 @@ First milestone: the foundation.
 - A single Discord guild is supported.
 - `/devices` lists 10 entities per page via a `page` option; interactive pagination arrives with the dashboard.
 
-[Unreleased]: https://github.com/nepthass/nepthass/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/nepthass/nepthass/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/nepthass/nepthass/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nepthass/nepthass/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nepthass/nepthass/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/nepthass/nepthass/tree/v0.1.0

@@ -207,7 +207,7 @@ Manual results for this group were recorded on 2026-10-29 (section 4, user-repor
 
 ### I. v0.4.0 notifications (real Discord)
 
-**Status: pending. No real Discord test guild or credentials were available, so every row below is "Not executed". Do not mark a row passed from the automated tests: they use a stub Discord.**
+**Status: partly executed. The maintainer ran N15-N33 on a real Discord test server and the development Home Assistant on 2026-10-30 (user-reported: see section 4). No result was reported for N01-N14, N24 was not tested (no second Discord user) and N34 is deferred. Rows marked "Not executed" were not run. Never mark a row passed from the automated tests: they use a stub Discord.**
 
 Setup: a dedicated **test** server (never production), the bot invited with `applications.commands`, the dev stack with the `app` profile built from this branch, the simulation at baseline and the seven virtual sensors shared. Put credentials in the env file only; never paste a token into chat, an issue or a commit. Prepare these channels: **#alerts** (bot has View Channel, Send Messages, Embed Links), **#no-send** (bot cannot send), **#no-embed** (bot cannot embed links), **#role-grant** (bot gets send only through a role), **#overwrite-deny** (a channel overwrite denies the bot's role), **#voice**, **#forum**, **#announcements**, a **thread** in #alerts, and a channel in a **second server**.
 
@@ -216,7 +216,7 @@ Setup: a dedicated **test** server (never production), the bot invited with `app
 | N01 | Start the bot; open the slash-command picker as an administrator and as a normal member | `/notifications` is registered, guild-only (not offered in DMs) | Not executed |
 | N02 | `/notifications status` before any setup | "Not configured"; no channel; zero rules | Not executed |
 | N03 | `/health` as a normal allowed user | a Notifications line saying *Disabled*; no channel or rule information | Not executed |
-| N04 | `/notifications status` and `add` as a non-administrator | refused as not an administrator; `/audit` shows a *denied* row | Not executed |
+| N04 | `/notifications status` and `add` as a non-administrator | refused with "This command is for NeptHass administrators."; nothing changes. **No audit row is written for this refusal** (the command gate refuses before the notification code runs, as for every administrator command) | Not executed |
 | N05 | `/notifications channel #alerts` | accepted; the reply names the channel and warns that everyone who can read it sees the alerts | Not executed |
 | N06 | `channel #no-send` | rejected, naming *Send Messages* | Not executed |
 | N07 | `channel #no-embed` | rejected, naming *Embed Links* | Not executed |
@@ -227,26 +227,26 @@ Setup: a dedicated **test** server (never production), the bot invited with `app
 | N12 | `add` with autocomplete as an administrator; try a sensor that is not shared | only shared, monitored sensors are offered, shown by name, never by entity ID; the unshared one is absent | Not executed |
 | N13 | `add` errors: `above` and `below` together, `cooldown` 2000, a state rule on a thermometer, a duplicate, before monitoring has synchronized (right after start) | each gives its own clear message and creates nothing | Not executed |
 | N14 | `add` Door, Window, Motion, Water leak (state), Temperature `above:30`, Battery `below:50`, each with `cooldown:0`; then `list` | seven rules, numbered, by name, all *active* | Not executed |
-| N15 | Run `NeptHass Dev: door opened`, then reset | one alert in #alerts: name, "is now open", time; no mention; no entity ID; closing sends nothing | Not executed |
-| N16 | Run the motion, window, water leak, high temperature and low battery scenarios | one alert each, worded correctly (motion detected, wet, rose above 30, fell below 50 with the value and unit) | Not executed |
-| N17 | Leak unavailable then wet: `sensors offline`, `water leak`, then turn the leak "offline" helper off | an alert saying the state was unknown or unavailable before, "please check it" | Not executed |
-| N18 | Cooldown: add a Door rule with the default cooldown; open, close, reopen within a minute; `status` | one alert; `status` counts one muted; the next alert after the cooldown says how many were muted | Not executed |
-| N19 | `pause rule:<n>`, trigger it, `resume rule:<n>`, trigger it; then `pause` and `resume` with no rule; then `remove` | no alert while paused; alerts after resume; global pause stops everything; a removed rule never alerts | Not executed |
-| N20 | Revoke sharing: `/permissions revoke` the door, open it; `list`; share it again | no alert; the rule shows *needs sharing*; it resumes on the next real transition | Not executed |
-| N21 | Initial silence: leave the door open, restart NeptHass | no alert for the already-open door; the next real opening alerts | Not executed |
-| N22 | Restart persistence: restart NeptHass, `status` and `list` | channel and rules are still configured and *Enabled* | Not executed |
-| N23 | No mentions: give a sensor an alias containing `@everyone` and `<@your-user-id>`, trigger it | the text is shown literally; nobody is pinged | Not executed |
-| N24 | Privacy: view #alerts as a member who has no NeptHass access to the sensors | they can read the alerts (documented); `/sensors` and autocomplete still show them nothing | Not executed |
-| N25 | Channel permission loss: remove the bot's Send Messages in #alerts, trigger an alert, then check `status` and `/health` | the alert is not delivered; status names the missing permission; after repeated failures the breaker is open and health is *Degraded*; restoring the permission recovers within about a minute | Not executed |
-| N26 | Channel deletion: delete #alerts, trigger an alert | status shows the channel was deleted; rules are kept; choosing a new channel recovers | Not executed |
-| N27 | Network cut to Discord for 2 minutes while sensors change, then restore (the bot's gateway drops and reconnects) | alerts are retried and arrive after the restore if younger than 10 minutes; REST delivery works after the gateway reconnects; anything older is dropped, counted, and a digest of the current state follows | Not executed |
-| N28 | Rate limit: with cooldown 0 on several sensors, flap them 20 times quickly | no failed messages; sends are paced (about one per second); `status` shows any retries; observe how a real 429 is handled | Not executed |
-| N29 | Monitoring down: stop the Home Assistant container for more than 5 minutes, then start it | one "monitoring down" alert after five minutes, not repeated; a recovery notice after it returns | Not executed |
-| N30 | While Home Assistant is down open a door, then bring it back | the recovery notice appears before the late alert marked "detected after NeptHass reconnected" | Not executed |
-| N31 | Stop NeptHass itself during an outage of less than five minutes, and again after more than five | no down alert is ever caused by NeptHass stopping | Not executed |
-| N32 | Sensors from unavailable at startup: restart NeptHass while Home Assistant is stopped, then start Home Assistant | a down alert only after five minutes counted from NeptHass's start | Not executed |
-| N33 | `/audit` after the above | notification changes, denied attempts and the test are listed; no tokens, channel names or Discord error text | Not executed |
-| N34 | Upgrade path: copy a v0.3.0 database, start v0.4.0 on it; then start a v0.3.0 binary on the upgraded copy | v0.4.0 starts with notifications *Not configured*; v0.3.0 refuses ("database schema is newer"); restoring the backup works | Not executed |
+| N15 | Run `NeptHass Dev: door opened`, then reset | one alert in #alerts: name, "is now open", time; no mention; no entity ID; closing sends nothing | User-reported pass (section 4) |
+| N16 | Run the motion, window, water leak, high temperature and low battery scenarios | one alert each, worded correctly (motion detected, wet, rose above 30, fell below 50 with the value and unit) | User-reported pass (section 4) |
+| N17 | Leak unavailable then wet: `sensors offline`, `water leak`, then turn the leak "offline" helper off | an alert saying the state was unknown or unavailable before, "please check it" | User-reported pass (section 4) |
+| N18 | Cooldown: add a Door rule with the default cooldown; open, close, reopen within a minute; `status` | one alert; `status` counts one muted; the next alert after the cooldown says how many were muted | User-reported pass (section 4) |
+| N19 | `pause rule:<n>`, trigger it, `resume rule:<n>`, trigger it; then `pause` and `resume` with no rule; then `remove` | no alert while paused; alerts after resume; global pause stops everything; a removed rule never alerts | User-reported pass (section 4) |
+| N20 | Revoke sharing: `/permissions revoke` the door, open it; `list`; share it again | no alert; the rule shows *needs sharing*; it resumes on the next real transition | User-reported pass (section 4) |
+| N21 | Initial silence: leave the door open, restart NeptHass | no alert for the already-open door; the next real opening alerts | User-reported pass (section 4) |
+| N22 | Restart persistence: restart NeptHass, `status` and `list` | channel and rules are still configured and *Enabled* | User-reported pass (section 4) |
+| N23 | No mentions: give a sensor an alias containing `@everyone` and `<@your-user-id>`, trigger it | the text is shown literally; nobody is pinged | User-reported partial: alias validation passed; outbound mention suppression not exercised (section 4) |
+| N24 | Privacy: view #alerts as a member who has no NeptHass access to the sensors | they can read the alerts (documented); `/sensors` and autocomplete still show them nothing | Not tested: no second Discord user |
+| N25 | Channel permission loss: remove the bot's Send Messages in #alerts, trigger an alert, then check `status` and `/health` | the alert is not delivered; status names the missing permission; after repeated failures the breaker is open and health is *Degraded*; restoring the permission recovers within about a minute | User-reported pass (section 4) |
+| N26 | Channel deletion: delete #alerts, trigger an alert | status shows the channel was deleted; rules are kept; choosing a new channel recovers | User-reported pass (section 4) |
+| N27 | Network cut to Discord for 2 minutes while sensors change, then restore (the bot's gateway drops and reconnects) | alerts are retried and arrive after the restore if younger than 10 minutes; REST delivery works after the gateway reconnects; anything older is dropped, counted, and a digest of the current state follows | User-reported partial: full Docker network outage only, Discord-only outage not isolated (section 4) |
+| N28 | Rate limit: with cooldown 0 on several sensors, flap them 20 times quickly | no failed messages; sends are paced (about one per second); `status` shows any retries; observe how a real 429 is handled | User-reported partial: burst and queue drain passed, no real 429 observed (section 4) |
+| N29 | Monitoring down: stop the Home Assistant container for more than 5 minutes, then start it | one "monitoring down" alert after five minutes, not repeated; a recovery notice after it returns | User-reported pass (section 4) |
+| N30 | While Home Assistant is down open a door, then bring it back | the recovery notice appears before the late alert marked "detected after NeptHass reconnected" | User-reported partial: general recovery passed, missed-event scenario not verified (section 4) |
+| N31 | Stop NeptHass itself during an outage of less than five minutes, and again after more than five | no down alert is ever caused by NeptHass stopping | User-reported pass (section 4) |
+| N32 | Sensors from unavailable at startup: restart NeptHass while Home Assistant is stopped, then start Home Assistant | a down alert only after five minutes counted from NeptHass's start | User-reported pass (section 4) |
+| N33 | `/audit` after the above | notification changes, denied attempts and the test are listed; no tokens, channel names or Discord error text | User-reported partial: core audit behaviour passed, not every rejection variant (section 4) |
+| N34 | Upgrade path: copy a v0.3.0 database, start v0.4.0 on it; then start a v0.3.0 binary on the upgraded copy | v0.4.0 starts with notifications *Not configured*; v0.3.0 refuses ("database schema is newer"); restoring the backup works | Deferred by decision (private pre-v1.0.0 development) |
 
 Not covered by any row because it needs special conditions: the 200-rule limit and the queue-overflow digest with many real sensors (covered by automated tests), and a failed configuration reload (covered by an automated test that breaks the store).
 
@@ -269,7 +269,7 @@ Version/commit tested: `________`   Tester: `________`   Date: `________`
 | F. Resilience | M30-M32 | Not executed | | |
 | G. v0.2.0 setup wizard and /sync | S01-S25 | Partly: see section 4 (user-reported) | User-reported pass for S01, S03, S08, S09, S10, S13, S14, S15, S18, S22 | The other group G rows were not reported |
 | H. v0.3.0 live monitoring | L01-L18 | Partly: see section 4 (user-reported, 2026-10-29) | User-reported pass for L01 to L05, L07 to L09, L11, L12, L15, L16 (recovery after start) and L18; L10 from earlier testing on an earlier revision; L17 partly | Not executed or not recorded: L06, L13, L14, the pending L17 commands, and the manual L16 pre-synchronization message |
-| I. v0.4.0 notifications (real Discord) | N01-N34 | Not executed | | Pending: no real test guild or credentials were available. Automated tests used a stub Discord. |
+| I. v0.4.0 notifications (real Discord) | N01-N34 | Partly: see section 4 (user-reported, 2026-10-30) | User-reported pass for N15-N22, N25, N26, N29, N31, N32; partial for N23, N27, N28, N30, N33 | No result reported for N01-N14; N24 not tested; N34 deferred |
 
 ## Known gaps
 
@@ -374,15 +374,28 @@ These were produced by commands run against the branch, never by a person in Dis
 | `docker compose config` for `compose.yaml`, `deploy/compose.with-homeassistant.yaml` and `compose.dev.yaml` (all profiles); image build | pass; the image carries `org.opencontainers.image.source=https://github.com/nepthass/nepthass` |
 | During the release-blocking fixes (earlier the same day) | the changed packages passed `-race -shuffle=on -count=4` on one CPU; 9 deliberate regressions of the fixes (including retaining a class for a real value) were all caught by the tests |
 
-### v0.4.0 (`feature/v0.4.0`, unreleased): automated results (executed by the assistant, not manual)
+### v0.4.0: automated results (executed by the assistant, not manual)
 
-Executed on 2026-10-30 against the final tree of milestone M5 (local branch, nothing pushed). These are automated results; **none of the group I rows (N01-N34) was executed**, because no real Discord test guild or credentials were available.
+Executed on 2026-10-30 against the final release tree (before the pull request). These are automated results; the manual Discord results are in the next subsection and are user-reported and partial.
 
 - `gofmt`, `go vet ./...` (also with the `integration` tag), `go build` and `go mod verify`: clean.
-- `go test -race -shuffle=on -count=1 ./...`: 15 packages, 374 passing test lines, 0 failures, 0 skipped.
-- Real Home Assistant integration suite (isolated Compose project, removed afterwards): 39 of 39, the 28 existing tests plus 11 new notification tests (door, motion, leak, leak unavailable to wet, temperature and battery thresholds, cooldown, revocation, an already-open door at startup, a real outage with a late alert, a five-minute disconnect with down and recovery notices, a Discord outage with retries, queue saturation with a digest, restart persistence). The sender in these tests is a recorder, not Discord.
-- Stub-Discord REST tests (`internal/discord`): delivery and empty allowed-mentions, one HTTP request per attempt for every error class, channel validation including role and permission-overwrite combinations, REST after the session is closed, audit of rejected and denied actions, a failed reload ("saved but not active") that heals, a queued down alert withdrawn on recovery, an ambiguous failure producing a duplicate, a breaker that recovers, and shutdown with an in-flight delivery. A stub proves NeptHass's requests and error handling, not Discord's behaviour.
-- Constrained-CPU stress with the race detector, one package at a time: 0.5 CPU for notify, discord, discord/commands, storage and cmd (8 runs each) and 0.25 CPU for the goroutine-heavy tests (10 runs each): all pass. One test that failed 5 times in 80 runs at 0.25 CPU exposed a real lost wake-up in the dispatcher; it was fixed, the 80-run repeat now passes, and a regression test fails without the fix.
-- Migration: a v0.3.0-shaped database (migrations 0001-0002 with data) upgrades to 0003, survives a restart unchanged, and a v0.3.0 build is refused ("schema is newer").
-- Docker Compose configuration validated for the production and development files, and the application image built locally with `docker build` (not published, removed afterwards).
-- **Not executed:** real Discord (N01-N34), GitHub CI (the branch was never pushed), a release image publication.
+- `go test -race -shuffle=on -count=1 ./...`: 15 packages, 379 passing test lines, 0 failures, 0 skipped.
+- Real Home Assistant 2026.10.4 integration suite (isolated Compose project, removed afterwards): 39 of 39, the 28 existing tests plus 11 notification tests (door, motion, leak, leak unavailable to wet, temperature and battery thresholds, cooldown, revocation, an already-open door at startup, a real outage with a late alert, a five-minute disconnect with down and recovery notices on an injected clock, a Discord outage with retries, queue saturation with a digest, restart persistence). The sender in those tests is a recorder, not Discord.
+- Stub-Discord REST tests (`internal/discord`): delivery and empty allowed-mentions, hostile names (`@everyone`, `@here`, user, role and channel mentions) through the real send path, one HTTP request per attempt for every error class, a real HTTP 429 with `retry_after` through the dispatcher, channel validation including role and overwrite combinations, REST after the session is closed, audit of rejected actions, a failed reload that heals, a queued down alert withdrawn on recovery, an ambiguous failure producing a duplicate, a breaker that recovers, multi-identity authorization through the real interaction path, and shutdown with an in-flight delivery. A stub proves NeptHass's requests and error handling, not Discord's behaviour.
+- Constrained-CPU stress with the race detector, one package at a time: 0.5 CPU for notify, discord, discord/commands, storage and cmd (8 runs each) and 0.25 CPU for the goroutine-heavy end-to-end, admin, dispatcher, engine and notifier tests (10 runs each): all pass, no failures.
+- Migration: a v0.3.0-shaped database (migrations 0001-0002 with data) upgrades to 0003, survives a restart unchanged, and a v0.3.0 build is refused ("schema is newer"). This verifies the upgrade mechanics only; the manual N34 downgrade check is deferred.
+- Docker Compose configuration validated for the three files CI checks, and the application image built locally with `docker build` (not published, removed afterwards).
+- Audit findings fixed during the final audit (each with a regression test): the circuit breaker's probe slot consumed by a revoked message, and a dispatcher lost wake-up found by stress.
+- **Not executed:** a real HTTP 429 or a Discord-only outage against real Discord, a second Discord user, and N34.
+
+### v0.4.0 (group I): user-reported manual results
+
+Reported by the maintainer on 2026-10-30 after running the checklist on a real Discord test server and the development Home Assistant. The release manager did not observe these runs; they are recorded as reported and are not upgraded to full passes.
+
+- **Passed:** N15, N16, N17, N18, N19, N20, N21, N22 (events, cooldown, pause/resume/remove, revocation, restart silence and persistence), N25 (channel permission failure and recovery), N26 (deleted channel recovery), N29 (Home Assistant outage detection), N31 and N32 (restart and outage handling).
+- **Partial:** N23 (alias validation passed; outbound mention suppression was not directly exercised on Discord), N27 (a full Docker network outage was tested; a Discord-only outage was not isolated), N28 (burst delivery and queue drain passed; no real HTTP 429 was observed and none was provoked on purpose), N30 (general recovery passed; the exact missed-event recovery scenario was not verified), N33 (core audit behaviour passed; not every rejection variant was verified).
+- **Not tested:** N24 (needs a second Discord user).
+- **Deferred:** N34 (v0.3.0 to v0.4.0 migration and downgrade compatibility), by decision, because the project is still in private pre-v1.0.0 development. A fresh v0.4.0 database, the 0003 migration, persistence and restart are covered by automated tests.
+- **No result reported:** N01-N14.
+
+The gaps above are covered by automated tests that do not depend on real Discord: mention suppression with hostile names (including role, channel and `@here` mentions) through the real send path, a real HTTP 429 with `retry_after` through the dispatcher, a Discord-only failure with retries, a missed opening found by the reconnect snapshot against a real Home Assistant, duplicate suppression, multi-identity authorization through the real interaction path, and the audit variants. A stub proves NeptHass's requests and error handling, not Discord's behaviour.

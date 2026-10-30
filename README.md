@@ -17,7 +17,7 @@ NeptHass is being built milestone by milestone. v0.1.0 (Foundation) and v0.2.0 (
 | v0.1.0 | Foundation: configuration, Discord connection, Home Assistant REST client, SQLite, authorization, basic commands, Docker | **Implemented** |
 | v0.2.0 | Interactive `/setup` wizard, entity discovery, aliases, persistent setup sessions, `/sync` | **Implemented** |
 | v0.3.0 | Home Assistant WebSocket, real-time sensor monitoring, reconnection and reconciliation | **Released** |
-| v0.4.0 | Smart notifications (motion, door/window, leak, battery, temperature, humidity), cooldowns, monitoring-down notices | **Implemented on `feature/v0.4.0` (not released)** |
+| v0.4.0 | Smart notifications (motion, door/window, leak, battery, temperature, humidity), cooldowns, monitoring-down notices | **Released** |
 | v0.5.0 | Rules engine: thresholds, durations, quiet hours, hysteresis | Planned |
 | v0.6.0 | Interactive `/home` dashboard | Planned |
 | v1.0.0 | Stable release: hardening, release workflow, full docs | Planned |

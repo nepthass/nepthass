@@ -154,7 +154,7 @@ Pending runtime state (queues, cooldown timers, the baseline of each rule) is no
 
 ## Audit
 
-Every configuration change is audited atomically. Denied or failed administrative actions are audited too: a non-administrator attempt, a rejected channel (with a fixed reason code such as `rejected_not_text`, never the channel or Discord's text), and the outcome of `/notifications test`. Audit detail contains only fixed sentinel wording (anything else is stored as "internal error"), never user input, tokens or Discord error messages. A successful channel change records the new channel ID, which is not a secret.
+Every configuration change is audited atomically. Failed or denied administrative actions are audited too: a rejected channel (with a fixed reason code such as `rejected_not_text`, never the channel or Discord's text), the outcome of `/notifications test`, and any denial that reaches the service layer. A non-administrator is refused earlier, by the command gate, and that refusal is **not** audited, exactly as for every other administrator command; auditing refusals at the gate is a candidate for a later milestone. Audit detail contains only fixed sentinel wording (anything else is stored as "internal error"), never user input, tokens or Discord error messages. A successful channel change records the new channel ID, which is not a secret.
 
 ## Observability
 
@@ -172,4 +172,4 @@ Migration `0003` creates the two notification tables on first start of v0.4.0. I
 
 Verified by automated tests: rule semantics, the mailbox, queues, dispatcher, breaker, monitoring-down machine, reload failure and recovery, audit, channel validation including role and overwrite combinations, the Discord sender against a **stub REST server**, and the full chain against a **real Home Assistant** (with a recording sender in place of Discord).
 
-Not verified: anything against **real Discord**: the exact `retry_after` handling of a real 429, real permission edge cases, and REST delivery after a live gateway disconnect. These are listed as pending in [the smoke tests](../development/smoke-tests.md#i-v040-notifications-real-discord).
+A manual QA run on a real Discord test server and the development Home Assistant was reported by the maintainer (partial, user-reported; see [the QA record](../development/smoke-tests.md#i-v040-notifications-real-discord)). Not verified against real Discord: a real HTTP 429, a Discord-only outage, a second user, and the v0.3.0 to v0.4.0 downgrade (deferred while the project is in private pre-v1.0.0 development). Those behaviors are covered by stub-server tests only.
