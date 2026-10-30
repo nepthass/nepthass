@@ -95,6 +95,25 @@ The limit is 6 commands per 10 seconds per user (setup wizard clicks have their 
 - **A sensor looks "stale".** Every line gets a warning icon and a banner while monitoring is not healthy. The values are the last known ones, not current.
 - **The log.** Look for `home assistant websocket authenticated`, `event subscription active`, `initial synchronization completed` and `connection lost; reconnect scheduled` (with the failure category and delay). Raw payloads and tokens are never logged.
 
+## Notification problems
+
+Start with `/notifications status` (administrators): it shows the channel, rule statuses, last delivery and last failure, queue and dropped counts, and whether the circuit breaker is open.
+
+- **No alerts arrive.** Check, in order: notifications are *Enabled* (not *Paused* or *Not configured*); the rule is *active* in `/notifications list`; live monitoring is healthy in `/health`; and the status shows no delivery failure.
+- **The rule says "needs sharing".** The sensor is not shared with NeptHass users any more. Share it again with `/permissions allow`; the rule resumes by itself.
+- **The door was already open when I started it or created the rule.** A first observation never alerts: NeptHass reports changes, not what already was. Close and reopen the door, or use `/sensors`.
+- **I only got one alert for several openings.** That is the cooldown (door 1 minute, motion 5, leak and temperature 15, battery 6 hours). Suppressed alerts are counted in `status` and are not sent later; change the cooldown with a new rule or set it to 0.
+- **"The bot is missing these permissions in that channel".** Give the bot View Channel, Send Messages and Embed Links in that channel (check the channel's permission overwrites as well as the server roles).
+- **Status shows "the bot lacks permission in the channel" or "the channel was deleted".** The channel changed after it was chosen. Fix the permission or choose a channel again with `/notifications channel`. After three failures the circuit breaker opens and sends are skipped; one probe per minute closes it again once Discord accepts a message.
+- **"Saved but not active".** The change reached the database but the running engine could not load it. `/health` shows *Degraded*, NeptHass retries every few seconds, and a restart also applies it. Look for "notification configuration could not be loaded" in the log; a locked or damaged database is the usual cause.
+- **An alert says "detected after NeptHass reconnected".** Monitoring lost its connection and the change was found by the snapshot afterwards; it may have happened earlier.
+- **An alert says the state "was unknown or unavailable before".** A leak sensor came back wet after being unavailable. Check it.
+- **"Alerts were dropped recently" or "delivery backlog".** Discord was slow or failing long enough that alerts expired (10 minutes) or the queue overflowed. A digest of the *current* state follows once delivery recovers; the history in between is not recoverable.
+- **A message arrived twice.** After an ambiguous failure (Discord may have accepted it) NeptHass retries, so a duplicate is possible by design.
+- **Alerts were lost after a restart.** Pending alerts are kept in memory only. Run `status` after a restart to confirm the configuration is active.
+- **"Monitoring is down" alert.** Live monitoring was unhealthy for five continuous minutes. See *Live monitoring problems* above. A recovery notice follows once monitoring is back, if the down alert was delivered.
+- **`/notifications` does not appear.** It is guild-only and administrator-only; wait for command registration or restart NeptHass, and see *Slash commands do not appear*.
+
 ## Still stuck
 
 Open an issue with the NeptHass version (`docker run --rm nepthass:latest version`), the relevant log lines, and your deployment type. Redact tokens, IDs you consider private, and entity names. For security problems use [SECURITY.md](../SECURITY.md) instead.

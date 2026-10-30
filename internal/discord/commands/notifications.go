@@ -19,7 +19,12 @@ import (
 
 // UserError is a failure whose message is safe and useful to show an
 // administrator verbatim (for example why a channel was rejected).
-type UserError struct{ Msg string }
+type UserError struct {
+	Msg string
+	// Reason is a short code from a fixed vocabulary (never user input), used
+	// only to label an audit entry. It may be empty.
+	Reason string
+}
 
 func (e *UserError) Error() string { return e.Msg }
 

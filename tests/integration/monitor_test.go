@@ -21,17 +21,32 @@ const monitorWait = 20 * time.Second
 // to it) and stops it when the test ends, proving Run returns.
 func startMonitor(t *testing.T, url, token string) *monitor.Monitor {
 	t.Helper()
+	m := newMonitorHook(t, url, token, nil)
+	runMonitor(t, m)
+	return m
+}
+
+// newMonitorHook builds, without running, a Monitor that delivers its changes to onChange.
+func newMonitorHook(t *testing.T, url, token string, onChange func(monitor.Change)) *monitor.Monitor {
+	t.Helper()
 	m, err := monitor.New(monitor.Config{
 		HomeAssistant: config.HomeAssistant{URL: url, Token: config.Secret(token), Timeout: requestTimeout},
 		Backoff: monitor.Backoff{
 			Initial: 50 * time.Millisecond, Max: 400 * time.Millisecond, AuthInitial: 50 * time.Millisecond, AuthMax: 100 * time.Millisecond,
 			StableAfter: time.Hour, Rand: func(n int64) int64 { return n - 1 },
 		},
-		Session: ws.Options{HandshakeTimeout: 5 * time.Second, PingInterval: 5 * time.Second, ReadTimeout: 30 * time.Second},
+		Session:  ws.Options{HandshakeTimeout: 5 * time.Second, PingInterval: 5 * time.Second, ReadTimeout: 30 * time.Second},
+		OnChange: onChange,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	return m
+}
+
+// runMonitor runs m and stops it when the test ends, proving Run returns.
+func runMonitor(t *testing.T, m *monitor.Monitor) {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	go m.Run(ctx)
 	t.Cleanup(func() {
@@ -45,7 +60,6 @@ func startMonitor(t *testing.T, url, token string) *monitor.Monitor {
 			t.Errorf("%d illegal state transitions", v)
 		}
 	})
-	return m
 }
 
 func waitMonitor(t *testing.T, m *monitor.Monitor, pred func(monitor.Status) bool) monitor.Status {

@@ -39,6 +39,8 @@ Discord gateway, Home Assistant REST API (with its version) and the database. A 
 
 It also shows the reconnect count and the number of invalid messages ignored. It never shows the Home Assistant URL, the token or raw error text. Monitoring problems do not stop `/devices`, `/status` or `/control`, which use the REST API.
 
+The **Notifications** line (v0.4.0) shows one non-sensitive status for every allowed user: *Disabled*, *Enabled*, or *Degraded* with the reasons (for example a failing delivery channel, or a saved configuration that is not active). It never shows the channel, rules or sensors. Administrators get the detail from `/notifications status`.
+
 ## /devices
 
 `/devices [page]` lists the entities you may see, 10 per page, with live state, your access level (`read` or `control`) and the alias if one is set. Entities Home Assistant no longer reports are marked "not found in Home Assistant". Unavailable and unknown states are spelled out as "not reporting", never as off or safe.
@@ -97,6 +99,39 @@ Fetches Home Assistant's entities and reports: how many there are, how many can 
 ## /permissions
 
 `/permissions allow entity access`, `revoke entity`, `list`. Administrators only. The same rules apply as in the wizard (control only for lights and switches; the entity must exist). It writes the same permission table as `/setup`, so the two always agree.
+
+## /notifications
+
+`/notifications <subcommand>` (administrators, guild-only; every reply is ephemeral) configures alerts for shared sensors. Notifications are **disabled until a channel is set**. Design and guarantees: [design/notifications.md](design/notifications.md).
+
+| Subcommand | What it does |
+| --- | --- |
+| `channel <channel>` | Choose the text channel that receives alerts. NeptHass checks that it exists, belongs to this server, is a text channel (not voice, forum, announcement, thread or DM), and that the bot can View Channel, Send Messages and Embed Links. The reply warns that **everyone who can read that channel will see the alerts**. |
+| `add <entity> [above] [below] [cooldown]` | Create a rule. Without `above`/`below` it is a *state* rule for door, window, motion, leak and battery-low sensors. With `above` or `below` (not both) it is a threshold rule for temperature, humidity and battery-level sensors. `cooldown` is in minutes, 0 to 1440; 0 disables it, omitting it uses the default for the sensor type. |
+| `list` | All rules with their number, name, what they watch and their status: *active*, *paused*, *needs sharing*, *not monitored* or *incompatible*. |
+| `pause [rule]` / `resume [rule]` | Pause or resume one rule; **without a rule, pause or resume all notifications**. |
+| `remove <rule>` | Delete a rule. |
+| `test` | Send a test message to the alert channel. |
+| `status` | Channel, rule counts, last delivery and failure, queue depth, dropped counts by reason, circuit-breaker and monitoring-down state. |
+
+Examples:
+
+```
+/notifications channel channel:#home-alerts
+/notifications add entity:Front door
+/notifications add entity:Living room temperature above:28 cooldown:30
+/notifications add entity:Phone battery below:15
+/notifications pause rule:3
+/notifications status
+```
+
+Details worth knowing:
+
+- Autocomplete offers only sensors that are **shared and currently monitored**, shown by name; entity IDs are never shown in lists, status or alerts.
+- `add` explains when monitoring has not synchronized yet, and refuses unshared, unmonitored or incompatible entities, duplicate rules (one per entity and kind), thresholds outside +/-1,000,000 and the 201st rule.
+- Default cooldowns: door and window 1 minute, motion 5 minutes, leak and temperature and humidity 15 minutes, battery 6 hours. A suppressed alert is not deferred and does not repeat later.
+- An unshared sensor's rules stay in `list` as *needs sharing* and resume when it is shared again.
+- If a change is saved but cannot be loaded into the running engine, the reply says so ("saved but **not active**"), `status` and `/health` show *Degraded*, and NeptHass keeps retrying.
 
 ## /audit
 

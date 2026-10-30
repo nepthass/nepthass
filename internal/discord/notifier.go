@@ -176,7 +176,7 @@ func classifySendError(err error) (error, string) {
 func (n *Notifier) ValidateChannel(ctx context.Context, channelID string) (string, error) {
 	s := n.session.Load()
 	if s == nil {
-		return "", &commands.UserError{Msg: "The Discord connection is not ready yet. Try again in a moment."}
+		return "", &commands.UserError{Msg: "The Discord connection is not ready yet. Try again in a moment.", Reason: "unavailable"}
 	}
 	opt := discordgo.WithContext(ctx)
 	ch, err := s.Channel(channelID, opt)
@@ -185,26 +185,26 @@ func (n *Notifier) ValidateChannel(ctx context.Context, channelID string) (strin
 		if errors.As(err, &re) && re.Response != nil {
 			switch re.Response.StatusCode {
 			case http.StatusNotFound:
-				return "", &commands.UserError{Msg: "That channel does not exist."}
+				return "", &commands.UserError{Msg: "That channel does not exist.", Reason: "not_found"}
 			case http.StatusForbidden:
-				return "", &commands.UserError{Msg: "The bot cannot see that channel. Give it access first."}
+				return "", &commands.UserError{Msg: "The bot cannot see that channel. Give it access first.", Reason: "no_access"}
 			}
 		}
-		return "", &commands.UserError{Msg: "Discord did not answer when checking the channel. Try again."}
+		return "", &commands.UserError{Msg: "Discord did not answer when checking the channel. Try again.", Reason: "unavailable"}
 	}
 	switch {
 	case ch.GuildID != n.guildID:
-		return "", &commands.UserError{Msg: "That channel is not in this server."}
+		return "", &commands.UserError{Msg: "That channel is not in this server.", Reason: "other_guild"}
 	case ch.Type != discordgo.ChannelTypeGuildText:
-		return "", &commands.UserError{Msg: "Choose a normal text channel, not a voice, forum, announcement, thread or direct-message channel."}
+		return "", &commands.UserError{Msg: "Choose a normal text channel, not a voice, forum, announcement, thread or direct-message channel.", Reason: "not_text"}
 	}
 	me, err := s.User("@me", opt)
 	if err != nil {
-		return "", &commands.UserError{Msg: "Discord did not answer when checking the bot's permissions. Try again."}
+		return "", &commands.UserError{Msg: "Discord did not answer when checking the bot's permissions. Try again.", Reason: "unavailable"}
 	}
 	perms, err := s.UserChannelPermissions(me.ID, channelID, opt)
 	if err != nil {
-		return "", &commands.UserError{Msg: "Discord did not answer when checking the bot's permissions. Try again."}
+		return "", &commands.UserError{Msg: "Discord did not answer when checking the bot's permissions. Try again.", Reason: "unavailable"}
 	}
 	var missing []string
 	for _, p := range []struct {
@@ -216,7 +216,7 @@ func (n *Notifier) ValidateChannel(ctx context.Context, channelID string) (strin
 		}
 	}
 	if len(missing) > 0 {
-		return "", &commands.UserError{Msg: fmt.Sprintf("The bot is missing these permissions in that channel: %s.", joinNames(missing))}
+		return "", &commands.UserError{Msg: fmt.Sprintf("The bot is missing these permissions in that channel: %s.", joinNames(missing)), Reason: "missing_permissions"}
 	}
 	return ch.Name, nil
 }

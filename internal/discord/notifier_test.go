@@ -119,17 +119,17 @@ func TestNotifier_validatesTheChannel(t *testing.T) {
 		id      string
 		want    string // substring of the user-facing reason; empty means accepted
 	}{
-		{"valid text channel", stubChannelInfo{stubGuild, text, "alerts", 0}, stubChannel, ""},
+		{"valid text channel", stubChannelInfo{stubGuild, text, "alerts", 0, nil}, stubChannel, ""},
 		{"unknown channel", stubChannelInfo{}, "999000000000000009", "does not exist"},
-		{"another server", stubChannelInfo{"400000000000000004", text, "elsewhere", 0}, stubChannel, "not in this server"},
-		{"direct message", stubChannelInfo{"", int(discordgo.ChannelTypeDM), "dm", 0}, stubChannel, "not in this server"},
-		{"voice channel", stubChannelInfo{stubGuild, int(discordgo.ChannelTypeGuildVoice), "voice", 0}, stubChannel, "normal text channel"},
-		{"forum channel", stubChannelInfo{stubGuild, int(discordgo.ChannelTypeGuildForum), "forum", 0}, stubChannel, "normal text channel"},
-		{"announcement channel", stubChannelInfo{stubGuild, int(discordgo.ChannelTypeGuildNews), "news", 0}, stubChannel, "normal text channel"},
-		{"thread", stubChannelInfo{stubGuild, int(discordgo.ChannelTypeGuildPublicThread), "thread", 0}, stubChannel, "normal text channel"},
-		{"bot cannot send", stubChannelInfo{stubGuild, text, "alerts", discordgo.PermissionSendMessages}, stubChannel, "Send Messages"},
-		{"bot cannot embed", stubChannelInfo{stubGuild, text, "alerts", discordgo.PermissionEmbedLinks}, stubChannel, "Embed Links"},
-		{"bot cannot see it", stubChannelInfo{stubGuild, text, "alerts", discordgo.PermissionViewChannel}, stubChannel, "View Channel"},
+		{"another server", stubChannelInfo{"400000000000000004", text, "elsewhere", 0, nil}, stubChannel, "not in this server"},
+		{"direct message", stubChannelInfo{"", int(discordgo.ChannelTypeDM), "dm", 0, nil}, stubChannel, "not in this server"},
+		{"voice channel", stubChannelInfo{stubGuild, int(discordgo.ChannelTypeGuildVoice), "voice", 0, nil}, stubChannel, "normal text channel"},
+		{"forum channel", stubChannelInfo{stubGuild, int(discordgo.ChannelTypeGuildForum), "forum", 0, nil}, stubChannel, "normal text channel"},
+		{"announcement channel", stubChannelInfo{stubGuild, int(discordgo.ChannelTypeGuildNews), "news", 0, nil}, stubChannel, "normal text channel"},
+		{"thread", stubChannelInfo{stubGuild, int(discordgo.ChannelTypeGuildPublicThread), "thread", 0, nil}, stubChannel, "normal text channel"},
+		{"bot cannot send", stubChannelInfo{stubGuild, text, "alerts", discordgo.PermissionSendMessages, nil}, stubChannel, "Send Messages"},
+		{"bot cannot embed", stubChannelInfo{stubGuild, text, "alerts", discordgo.PermissionEmbedLinks, nil}, stubChannel, "Embed Links"},
+		{"bot cannot see it", stubChannelInfo{stubGuild, text, "alerts", discordgo.PermissionViewChannel, nil}, stubChannel, "View Channel"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -224,6 +224,58 @@ func TestFormatMessage_everyKindWithoutEntityIDsAndWithTheRightCaveats(t *testin
 			}
 			if len(got) > 2000 {
 				t.Errorf("message longer than Discord allows: %d", len(got))
+			}
+		})
+	}
+}
+
+const (
+	pView  = discordgo.PermissionViewChannel
+	pSend  = discordgo.PermissionSendMessages
+	pEmbed = discordgo.PermissionEmbedLinks
+	pAll   = pView | pSend | pEmbed
+	roleR1 = "700000000000000007"
+)
+
+// The permission maths belongs to discordgo; these tests pin that NeptHass feeds
+// it real roles and overwrites (through the REST fallback) and reads the result.
+func TestNotifier_validatesRoleAndOverwriteCombinations(t *testing.T) {
+	text := int(discordgo.ChannelTypeGuildText)
+	cases := []struct {
+		name      string
+		everyone  int64
+		roles     map[string]int64
+		member    []string
+		owner     string
+		overwrite []stubOverwrite
+		want      string // empty: accepted
+	}{
+		{"a role grants what @everyone lacks", pView, map[string]int64{roleR1: pSend | pEmbed}, []string{roleR1}, "", nil, ""},
+		{"@everyone is denied send but the bot's role overwrite allows it", pAll, map[string]int64{roleR1: 0}, []string{roleR1}, "",
+			[]stubOverwrite{{stubGuild, 0, 0, pSend}, {roleR1, 0, pSend, 0}}, ""},
+		{"a member overwrite denies embed links", pAll, nil, nil, "", []stubOverwrite{{stubBot, 1, 0, pEmbed}}, "Embed Links"},
+		{"a role overwrite denies send", pAll, map[string]int64{roleR1: 0}, []string{roleR1}, "", []stubOverwrite{{roleR1, 0, 0, pSend}}, "Send Messages"},
+		{"an administrator role bypasses every overwrite", 0, map[string]int64{roleR1: discordgo.PermissionAdministrator}, []string{roleR1}, "",
+			[]stubOverwrite{{stubGuild, 0, 0, pAll}}, ""},
+		{"the guild owner has everything", 0, nil, nil, stubBot, nil, ""},
+		{"nothing grants send or embed", pView, nil, nil, "", nil, "Send Messages, Embed Links"},
+		{"an overwrite for a role the bot does not hold changes nothing", pAll, map[string]int64{roleR1: 0}, nil, "", []stubOverwrite{{roleR1, 0, 0, pSend}}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newNFix(t, false)
+			f.stub.everyone, f.stub.roles, f.stub.member, f.stub.owner = tc.everyone, tc.roles, tc.member, tc.owner
+			f.stub.channels[stubChannel] = stubChannelInfo{GuildID: stubGuild, Type: text, Name: "alerts", Overwrites: tc.overwrite}
+			_, err := f.n.ValidateChannel(bg, stubChannel)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("must be accepted: %v", err)
+				}
+				return
+			}
+			var ue *commands.UserError
+			if !errors.As(err, &ue) || ue.Reason != "missing_permissions" || !strings.Contains(ue.Msg, tc.want) {
+				t.Errorf("error = %v, want missing %q", err, tc.want)
 			}
 		})
 	}

@@ -324,3 +324,21 @@ func TestHealth_showsTheNotificationLineOnlyWhenNotificationsAreConfigured(t *te
 		t.Errorf("any user may see a non-sensitive line: %s", got)
 	}
 }
+
+func TestNotificationsCommand_listingsAndStatusNeverShowEntityIDs(t *testing.T) {
+	f := &fakeNotifications{rules: []RuleItem{{RuleView: notify.RuleView{Rule: notify.Rule{ID: 3, Entity: "binary_sensor.secret_vault", Kind: notify.KindState}, Status: notify.StatusNeedsSharing, Category: monitor.CategoryDoor}, Name: "Vault door"}}}
+	r := notifyReg(f, fakeMon{synced: true})
+	list := runN(r, adm, "list", nil).Embeds[0].Description
+	choices := r.Complete(context.Background(), Request{Actor: adm, Command: "notifications", Subcommand: "pause", Focused: "rule", Args: map[string]string{"rule": ""}})
+	var seen strings.Builder
+	seen.WriteString(list)
+	for _, c := range choices {
+		seen.WriteString(c.Name)
+	}
+	for _, e := range runN(r, adm, "status", nil).Embeds[0].Fields {
+		seen.WriteString(e.Name + e.Value)
+	}
+	if got := seen.String(); strings.Contains(got, "secret_vault") || strings.Contains(got, "binary_sensor") || !strings.Contains(got, "Vault door") {
+		t.Errorf("rules are shown by name only: %q", got)
+	}
+}

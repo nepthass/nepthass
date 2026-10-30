@@ -33,6 +33,14 @@ type stubChannelInfo struct {
 	Type    int
 	Name    string
 	Deny    int64 // permission bits denied to @everyone (and so to the bot) in this channel
+	// Overwrites, when set, replace the single @everyone deny above.
+	Overwrites []stubOverwrite
+}
+
+type stubOverwrite struct {
+	ID          string
+	Type        int // 0 role, 1 member
+	Allow, Deny int64
 }
 
 type stubReply struct {
@@ -56,6 +64,9 @@ type stubDiscord struct {
 	changed  chan struct{}
 	channels map[string]stubChannelInfo
 	everyone int64
+	roles    map[string]int64       // extra guild roles: id -> permission bits
+	member   []string               // role IDs the bot holds
+	owner    string                 // guild owner (all permissions)
 	reply    func(n int) *stubReply // nil result: 200
 	gate     chan struct{}          // when set, a POST blocks until it is closed
 }
@@ -98,11 +109,11 @@ func (s *stubDiscord) handle(w http.ResponseWriter, r *http.Request) {
 		if ch.GuildID != "" {
 			guild = `"guild_id":"` + ch.GuildID + `",`
 		}
-		write(200, `{"id":"`+strings.TrimPrefix(p, "channels/")+`",`+guild+`"type":`+strconv.Itoa(ch.Type)+`,"name":"`+ch.Name+`","permission_overwrites":[{"id":"`+stubGuild+`","type":0,"allow":"0","deny":"`+strconv.FormatInt(ch.Deny, 10)+`"}]}`)
+		write(200, `{"id":"`+strings.TrimPrefix(p, "channels/")+`",`+guild+`"type":`+strconv.Itoa(ch.Type)+`,"name":"`+ch.Name+`","permission_overwrites":`+s.overwritesJSON(ch)+`}`)
 	case r.Method == http.MethodGet && strings.Contains(p, "/members/"):
-		write(200, `{"user":{"id":"`+stubBot+`"},"roles":[],"joined_at":"2020-01-01T00:00:00.000000+00:00"}`)
+		write(200, `{"user":{"id":"`+stubBot+`"},"roles":`+s.memberRolesJSON()+`,"joined_at":"2020-01-01T00:00:00.000000+00:00"}`)
 	case r.Method == http.MethodGet && strings.HasPrefix(p, "guilds/"):
-		write(200, `{"id":"`+stubGuild+`","owner_id":"1","roles":[{"id":"`+stubGuild+`","name":"@everyone","permissions":"`+strconv.FormatInt(s.everyone, 10)+`"}]}`)
+		write(200, `{"id":"`+stubGuild+`","owner_id":"`+s.ownerID()+`","roles":`+s.rolesJSON()+`}`)
 	case r.Method == http.MethodPost && strings.HasSuffix(p, "/messages"):
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
@@ -121,6 +132,14 @@ func (s *stubDiscord) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		if reply != nil {
 			if rp := reply(n); rp != nil {
+				if rp.Status < 0 { // accept the request, then drop the connection without answering
+					if hj, ok := w.(http.Hijacker); ok {
+						if c, _, err := hj.Hijack(); err == nil {
+							_ = c.Close()
+						}
+					}
+					return
+				}
 				if rp.Status == 429 {
 					w.Header().Set("Retry-After", "1")
 				}
@@ -187,4 +206,51 @@ func newNFix(t *testing.T, channelConfigured bool) *nfix {
 		}
 	}
 	return &nfix{stub: st, n: n, store: store, db: db, sess: sess}
+}
+
+func (s *stubDiscord) overwritesJSON(ch stubChannelInfo) string {
+	ows := ch.Overwrites
+	if ows == nil {
+		ows = []stubOverwrite{{ID: stubGuild, Type: 0, Deny: ch.Deny}}
+	}
+	out := "["
+	for i, o := range ows {
+		if i > 0 {
+			out += ","
+		}
+		out += "{\"id\":\"" + o.ID + "\",\"type\":" + strconv.Itoa(o.Type) + ",\"allow\":\"" + strconv.FormatInt(o.Allow, 10) + "\",\"deny\":\"" + strconv.FormatInt(o.Deny, 10) + "\"}"
+	}
+	return out + "]"
+}
+
+func (s *stubDiscord) rolesJSON() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := "[{\"id\":\"" + stubGuild + "\",\"name\":\"@everyone\",\"permissions\":\"" + strconv.FormatInt(s.everyone, 10) + "\"}"
+	for id, p := range s.roles {
+		out += ",{\"id\":\"" + id + "\",\"name\":\"r\",\"permissions\":\"" + strconv.FormatInt(p, 10) + "\"}"
+	}
+	return out + "]"
+}
+
+func (s *stubDiscord) memberRolesJSON() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := "["
+	for i, r := range s.member {
+		if i > 0 {
+			out += ","
+		}
+		out += "\"" + r + "\""
+	}
+	return out + "]"
+}
+
+func (s *stubDiscord) ownerID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.owner == "" {
+		return "1"
+	}
+	return s.owner
 }

@@ -692,8 +692,9 @@ func TestEngine_runStopsEveryGoroutineOnCancellation(t *testing.T) {
 	done := make(chan struct{})
 	go func() { e.eng.Run(runCtx); close(done) }()
 	<-ticks
-	if len(goroutinesIn(engineGoroutines...)) < 3 {
-		t.Fatalf("expected the evaluator, dispatcher and watcher to be running: %v", goroutinesIn(engineGoroutines...))
+	// A goroutine that has been created but has not run yet already shows its Run closure.
+	if got := goroutinesIn("notify.(*Engine).Run.func"); len(got) < 3 {
+		t.Fatalf("Run must have started three goroutines (evaluator, dispatcher, watcher): %v", got)
 	}
 	cancel()
 	<-done
@@ -944,5 +945,40 @@ func TestEngine_aRecoveryNoticeIsQueuedAheadOfTheLateSnapshotAlertsItExplains(t 
 	}
 	if fmt.Sprint(kinds) != "[recovered late-leak late-door]" {
 		t.Errorf("recovery first, then the late alerts (critical lane first, then normal): %v", kinds)
+	}
+}
+
+func TestEngine_aFailedReloadKeepsThePreviousConfiguration_isDegraded_andTheWatcherRetriesUntilItWorks(t *testing.T) {
+	e := newEF(t, nil)
+	e.configure()
+	e.addRule(door, monitor.CategoryDoor, KindState, nil, dur(0))
+	if _, err := e.db.Exec("ALTER TABLE notification_rules RENAME TO notification_rules_broken"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.eng.Reload(ctx); err == nil {
+		t.Fatal("the reload must fail while the rules cannot be read")
+	}
+	h := e.eng.Health()
+	if !h.ConfigStale || !h.Degraded || !h.Active {
+		t.Fatalf("the previous configuration stays in force and the staleness is reported: %+v", h)
+	}
+	e.flow(door, monitor.CategoryDoor, "off", "on")
+	if len(e.sent()) != 1 {
+		t.Fatalf("the engine never half-loads: the previous rules still work: %d", len(e.sent()))
+	}
+
+	cancel, done, ticks := e.startRun()
+	defer func() { cancel(); <-done }()
+	<-ticks // the watcher retried and the store is still broken
+	if !e.eng.Health().ConfigStale {
+		t.Fatal("still broken, still stale")
+	}
+	if _, err := e.db.Exec("ALTER TABLE notification_rules_broken RENAME TO notification_rules"); err != nil {
+		t.Fatal(err)
+	}
+	e.clk.Advance(10 * time.Second)
+	<-ticks
+	if h := e.eng.Health(); h.ConfigStale || h.Degraded {
+		t.Errorf("the watcher must retry until the saved configuration is active again: %+v", h)
 	}
 }

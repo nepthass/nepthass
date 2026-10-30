@@ -2,6 +2,7 @@ package discord
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 
@@ -40,7 +41,7 @@ var _ commands.Notifications = (*NotificationAdmin)(nil)
 func (a *NotificationAdmin) reload(ctx context.Context) error {
 	if err := a.eng.Reload(ctx); err != nil {
 		a.log.Error("notification engine reload failed", "error", err)
-		return &commands.UserError{Msg: "The change was saved, but the running notification engine could not reload it. It will apply after the next restart."}
+		return &commands.UserError{Msg: "The change was saved but is NOT active yet: the running notification engine could not load it. The engine keeps the previous settings and retries every few seconds; /notifications status shows Degraded until it succeeds, and a restart also applies it."}
 	}
 	return nil
 }
@@ -51,10 +52,13 @@ func (a *NotificationAdmin) Config(ctx context.Context, actor auth.Actor) (notif
 
 func (a *NotificationAdmin) SetChannel(ctx context.Context, actor auth.Actor, channelID string) (string, error) {
 	if err := actor.Require(auth.LevelAdmin); err != nil {
+		a.svc.Record(ctx, actor, "notifications.channel", "set", err)
 		return "", err
 	}
 	name, err := a.notifier.ValidateChannel(ctx, channelID)
 	if err != nil {
+		// Audited with a fixed reason code and sentinel, never the channel ID or Discord's text.
+		a.svc.Record(ctx, actor, "notifications.channel", "rejected_"+rejectionReason(err), notify.ErrChannelRejected)
 		return "", err
 	}
 	if err := a.svc.SetChannel(ctx, actor, channelID); err != nil {
@@ -130,9 +134,31 @@ func (a *NotificationAdmin) RemoveRule(ctx context.Context, actor auth.Actor, id
 
 func (a *NotificationAdmin) SendTest(ctx context.Context, actor auth.Actor) error {
 	if err := actor.Require(auth.LevelAdmin); err != nil {
+		a.svc.Record(ctx, actor, "notifications.test", "send", err)
 		return err
 	}
-	return a.notifier.SendTest(ctx)
+	err := a.notifier.SendTest(ctx)
+	switch {
+	case err == nil:
+		a.svc.Record(ctx, actor, "notifications.test", "send", nil)
+	case errors.Is(err, notify.ErrNotConfigured):
+		a.svc.Record(ctx, actor, "notifications.test", "send", notify.ErrNotConfigured)
+	default:
+		a.svc.Record(ctx, actor, "notifications.test", "send", notify.ErrTestFailed)
+	}
+	return err
+}
+
+// rejectionReason is the fixed-vocabulary code of a channel rejection.
+func rejectionReason(err error) string {
+	var ue *commands.UserError
+	if errors.As(err, &ue) {
+		switch ue.Reason {
+		case "unavailable", "not_found", "no_access", "other_guild", "not_text", "missing_permissions":
+			return ue.Reason
+		}
+	}
+	return "unknown"
 }
 
 func (a *NotificationAdmin) Status(ctx context.Context, actor auth.Actor) (commands.NotificationStatus, error) {
@@ -179,6 +205,9 @@ func (a *NotificationAdmin) HealthLine() string {
 	h := a.eng.Health()
 	ns := a.notifier.Status()
 	switch {
+	case h.ConfigStale:
+		// Never report "Disabled" while the saved configuration differs from the running one.
+		return ui.IconWarn + " Degraded: " + strings.Join(h.Reasons, "; ")
 	case !h.Active:
 		return ui.IconDisabled + " Disabled"
 	case h.Degraded || h.BreakerOpen:

@@ -193,7 +193,7 @@ func TestNotificationAdmin_setChannelValidatesBeforeSaving_thenReloadsTheEngine(
 	if _, err := a.admin.SetChannel(ctx0, userActor, stubChannel); !errors.Is(err, auth.ErrAdminRequired) {
 		t.Fatalf("only administrators: %v", err)
 	}
-	a.stub.channels["500000000000000005"] = stubChannelInfo{stubGuild, 2, "voice", 0}
+	a.stub.channels["500000000000000005"] = stubChannelInfo{stubGuild, 2, "voice", 0, nil}
 	var ue *commands.UserError
 	if _, err := a.admin.SetChannel(ctx0, adminActor, "500000000000000005"); !errors.As(err, &ue) {
 		t.Fatalf("a voice channel must be rejected with a reason: %v", err)
@@ -361,8 +361,7 @@ func TestE2E_permissionLossIsVisibleInHealth_andStopsFurtherAttempts(t *testing.
 		select {
 		case <-deadline:
 			t.Fatal("three permission failures must open the circuit breaker")
-		default:
-			runtime.Gosched()
+		case <-time.After(time.Millisecond): // poll an in-process counter without burning the CPU quota
 		}
 	}
 	line := a.admin.HealthLine()
@@ -375,8 +374,7 @@ func TestE2E_permissionLossIsVisibleInHealth_andStopsFurtherAttempts(t *testing.
 		select {
 		case <-deadline:
 			t.Fatal("with the breaker open the next alert is dropped, counted and not attempted")
-		default:
-			runtime.Gosched()
+		case <-time.After(time.Millisecond): // poll an in-process counter without burning the CPU quota
 		}
 	}
 	if n := len(a.stub.postsSnapshot()); n != 3 {
@@ -407,5 +405,351 @@ func TestE2E_shutdownWithAnInFlightDeliveryIsBounded(t *testing.T) {
 	close(gate)
 	if h := a.eng.Health(); h.DroppedShutdown == 0 {
 		t.Errorf("the in-flight message is dropped and counted at shutdown: %+v", h)
+	}
+}
+
+func auditRows(t *testing.T, a *afix) []string {
+	t.Helper()
+	rows, err := a.db.QueryContext(ctx0, "SELECT actor_id||'|'||command||'|'||action||'|'||outcome||'|'||detail FROM command_audit_logs ORDER BY id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+func TestNotificationAdmin_deniedAndRejectedAttemptsAreAudited_withoutSecretsOrRawInput(t *testing.T) {
+	a := newAFix(t, false, nil)
+	voice := "500000000000000005"
+	a.stub.channels[voice] = stubChannelInfo{stubGuild, 2, "private-voice", 0, nil}
+	_, _ = a.admin.SetChannel(ctx0, userActor, stubChannel)
+	_, _ = a.admin.SetChannel(ctx0, adminActor, voice)
+	_ = a.admin.SendTest(ctx0, userActor)
+	if err := a.admin.SendTest(ctx0, adminActor); !errors.Is(err, notify.ErrNotConfigured) {
+		t.Fatalf("a test before configuration: %v", err)
+	}
+	if _, err := a.admin.SetChannel(ctx0, adminActor, stubChannel); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.admin.SendTest(ctx0, adminActor); err != nil {
+		t.Fatal(err)
+	}
+	a.stub.reply = func(int) *stubReply { return &stubReply{403, `{"message":"Missing Permissions","code":50013}`} }
+	_ = a.admin.SendTest(ctx0, adminActor)
+
+	want := []string{
+		userActor.UserID + "|notifications.channel|set|denied|" + auth.ErrAdminRequired.Error(),
+		adminActor.UserID + "|notifications.channel|rejected_not_text|error|channel rejected",
+		userActor.UserID + "|notifications.test|send|denied|" + auth.ErrAdminRequired.Error(),
+		adminActor.UserID + "|notifications.test|send|error|" + notify.ErrNotConfigured.Error(),
+		adminActor.UserID + "|notifications.channel|set|success|channel=" + stubChannel,
+		adminActor.UserID + "|notifications.test|send|success|",
+		adminActor.UserID + "|notifications.test|send|error|test message not delivered",
+	}
+	got := auditRows(t, a)
+	for i, r := range got {
+		if !strings.Contains(r, "|success|") && strings.Contains(r, stubChannel) {
+			t.Errorf("a denied or failed row must not name a channel: row %d %q", i, r)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("audit rows:\n%s", strings.Join(got, "\n"))
+	}
+	for i := range want {
+		if !strings.HasPrefix(got[i], strings.TrimSuffix(strings.Replace(want[i], userActor.UserID, userActor.UserID, 1), "|")) {
+			t.Errorf("row %d = %q, want %q", i, got[i], want[i])
+		}
+		for _, secret := range []string{voice, "private-voice", "Missing Permissions", "token"} {
+			if strings.Contains(got[i], secret) {
+				t.Errorf("row %d leaks %q: %q", i, secret, got[i])
+			}
+		}
+	}
+}
+
+func TestNotificationAdmin_aFailedReloadIsReportedAsSavedButNotActive_visibleInHealth_andSelfHeals(t *testing.T) {
+	a := newAFix(t, true, nil)
+	if _, err := a.admin.SetChannel(ctx0, adminActor, stubChannel); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.admin.SetPaused(ctx0, adminActor, true); err != nil || a.eng.Health().Active {
+		t.Fatalf("paused: %v", err)
+	}
+	if _, err := a.db.Exec("ALTER TABLE notification_rules RENAME TO notification_rules_broken"); err != nil {
+		t.Fatal(err)
+	}
+	err := a.admin.SetPaused(ctx0, adminActor, false) // commits the setting, then the reload cannot read the rules
+	var ue *commands.UserError
+	if !errors.As(err, &ue) || !strings.Contains(ue.Msg, "NOT active") {
+		t.Fatalf("must say the change is saved but not active: %v", err)
+	}
+	saved, ok, _ := a.store.GetSettings(ctx0, stubGuild)
+	h := a.eng.Health()
+	if !ok || !saved.Enabled || h.Active || !h.ConfigStale || !h.Degraded {
+		t.Fatalf("persisted (enabled=%v) and runtime (active=%v) differ and health must say so: %+v", saved.Enabled, h.Active, h)
+	}
+	if line := a.admin.HealthLine(); !strings.Contains(line, "Degraded") || !strings.Contains(line, "not active") {
+		t.Errorf("health line: %q", line)
+	}
+	if _, err := a.db.Exec("ALTER TABLE notification_rules_broken RENAME TO notification_rules"); err != nil {
+		t.Fatal(err)
+	}
+	cancel, done := a.run()
+	defer func() { cancel(); <-done }()
+	a.clk.await(t, 1) // the watcher's first pass retried the reload before sleeping
+	if h := a.eng.Health(); h.ConfigStale || !h.Active || h.Degraded {
+		t.Errorf("the engine must recover by itself once the store works: %+v", h)
+	}
+}
+
+func TestE2E_aQueuedDownAlertIsWithdrawnWhenMonitoringRecoversBeforeDelivery(t *testing.T) {
+	a := newAFix(t, true, func(c *notify.EngineConfig) { c.BackoffInitial, c.BackoffMax = 8*time.Minute, 8*time.Minute })
+	if _, err := a.admin.SetChannel(ctx0, adminActor, stubChannel); err != nil {
+		t.Fatal(err)
+	}
+	a.stub.reply = func(n int) *stubReply {
+		if n == 1 {
+			return &stubReply{500, "{}"}
+		}
+		return nil
+	}
+	a.stat.set(false)
+	cancel, done := a.run()
+	defer func() { cancel(); <-done }()
+	a.clk.await(t, 1)
+	for i := 0; i < 30; i++ {
+		a.clk.Advance(10 * time.Second)
+		a.clk.await(t, 1)
+	}
+	a.stub.waitPosts(1) // Discord fails the down alert: it waits for its retry
+	a.clk.await(t, 2)   // the watcher's tick and the dispatcher's retry timer
+	a.stat.set(true)
+	a.clk.Advance(10 * time.Second) // recovery, long before the eight minute retry
+	settle := time.After(stubWait)
+	// The state flips to "recovered" before the stale alert is removed, so wait for the removal itself.
+	for a.eng.Health().DroppedCancelled != 1 {
+		select {
+		case <-settle:
+			t.Fatalf("the stale alert was never withdrawn: %+v", a.eng.Health())
+		case <-time.After(time.Millisecond): // poll an in-process counter without burning the CPU quota
+		}
+	}
+	if h := a.eng.Health(); h.DroppedCancelled != 1 || h.QueueCritical != 0 {
+		t.Fatalf("recovery must withdraw the stale queued alert: %+v", h)
+	}
+	a.clk.Advance(9 * time.Minute)
+	a.clk.await(t, 1)
+	if n := len(a.stub.postsSnapshot()); n != 1 {
+		t.Errorf("neither the stale alert nor a recovery notice may ever be delivered: %d messages", n)
+	}
+}
+
+func TestE2E_anIntentionalShutdownDuringAnOutageProducesNoDownAlert(t *testing.T) {
+	a := newAFix(t, true, nil)
+	if _, err := a.admin.SetChannel(ctx0, adminActor, stubChannel); err != nil {
+		t.Fatal(err)
+	}
+	a.stat.set(false)
+	cancel, done := a.run()
+	a.clk.await(t, 1)
+	for i := 0; i < 29; i++ { // four minutes fifty seconds of outage
+		a.clk.Advance(10 * time.Second)
+		a.clk.await(t, 1)
+	}
+	cancel()
+	<-done
+	if n := len(a.stub.postsSnapshot()); n != 0 {
+		t.Errorf("shutting down is not an outage: %d messages", n)
+	}
+	awaitNoEngineGoroutines(t)
+}
+
+func awaitNoEngineGoroutines(t *testing.T) {
+	t.Helper()
+	deadline := time.After(stubWait)
+	for {
+		buf := make([]byte, 1<<20)
+		buf = buf[:runtime.Stack(buf, true)]
+		s := string(buf)
+		if !strings.Contains(s, "notify.(*Engine).run") && !strings.Contains(s, "notify.(*dispatcher)") {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("engine goroutines are still running after Run returned")
+		case <-time.After(time.Millisecond): // poll an in-process counter without burning the CPU quota
+		}
+	}
+}
+
+func TestE2E_anAmbiguousFailureIsRetriedAndCanDuplicateTheMessage(t *testing.T) {
+	a := newAFix(t, true, nil)
+	a.ready("binary_sensor.door", monitor.CategoryDoor)
+	if _, err := a.admin.SetChannel(ctx0, adminActor, stubChannel); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.admin.AddRule(ctx0, adminActor, notify.NewRule{Entity: "binary_sensor.door", Kind: notify.KindState, Cooldown: zero()}); err != nil {
+		t.Fatal(err)
+	}
+	a.stub.reply = func(n int) *stubReply {
+		if n == 1 {
+			return &stubReply{-1, ""} // Discord has the message, the answer never arrives
+		}
+		return nil
+	}
+	cancel, done := a.run()
+	defer func() { cancel(); <-done }()
+	a.clk.await(t, 1)
+	a.eng.OnChange(a.change("binary_sensor.door", "off", "on", monitor.SourceLive))
+	a.stub.waitPosts(1)
+	a.clk.await(t, 2) // the retry is scheduled
+	a.clk.Advance(2 * time.Second)
+	posts := a.stub.waitPosts(2)
+	c1, _ := posts[0].Body["content"].(string)
+	c2, _ := posts[1].Body["content"].(string)
+	deadline := time.After(stubWait)
+	for a.eng.Health().Delivered != 1 {
+		select {
+		case <-deadline:
+			t.Fatal("the retry must be delivered")
+		case <-time.After(time.Millisecond): // poll an in-process counter without burning the CPU quota
+		}
+	}
+	if c1 == "" || c1 != c2 {
+		t.Errorf("an ambiguous failure is retried, so the channel can receive the alert twice (documented): %q vs %q", c1, c2)
+	}
+}
+
+func TestE2E_discordUnavailableThenRecovered_deliversOnceWithBackoff_underTheSameDeadline(t *testing.T) {
+	a := newAFix(t, true, nil)
+	a.ready("binary_sensor.door", monitor.CategoryDoor)
+	if _, err := a.admin.SetChannel(ctx0, adminActor, stubChannel); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.admin.AddRule(ctx0, adminActor, notify.NewRule{Entity: "binary_sensor.door", Kind: notify.KindState, Cooldown: zero()}); err != nil {
+		t.Fatal(err)
+	}
+	a.stub.reply = func(n int) *stubReply {
+		if n <= 2 {
+			return &stubReply{503, `{"message":"unavailable"}`}
+		}
+		return nil
+	}
+	cancel, done := a.run()
+	defer func() { cancel(); <-done }()
+	a.clk.await(t, 1)
+	a.eng.OnChange(a.change("binary_sensor.door", "off", "on", monitor.SourceLive))
+	for i := 1; i <= 2; i++ {
+		a.stub.waitPosts(i)
+		a.clk.await(t, 2)
+		a.clk.Advance(3 * time.Second)
+	}
+	a.stub.waitPosts(3)
+	deadline := time.After(stubWait)
+	for a.eng.Health().Delivered != 1 {
+		select {
+		case <-deadline:
+			t.Fatal("the alert must be delivered once Discord recovers")
+		case <-time.After(time.Millisecond): // poll an in-process counter without burning the CPU quota
+		}
+	}
+	if h := a.eng.Health(); h.Retried != 2 || h.DroppedTTL != 0 || h.Degraded {
+		t.Errorf("two retries, no loss: %+v", h)
+	}
+}
+
+func TestE2E_theCircuitBreakerRecoversAndHealthReturnsToNormal(t *testing.T) {
+	a := newAFix(t, true, nil)
+	if _, err := a.admin.SetChannel(ctx0, adminActor, stubChannel); err != nil {
+		t.Fatal(err)
+	}
+	ids := []string{"binary_sensor.da", "binary_sensor.db", "binary_sensor.dc", "binary_sensor.dd", "binary_sensor.de"}
+	for _, id := range ids {
+		a.ready(id, monitor.CategoryDoor)
+		if _, err := a.admin.AddRule(ctx0, adminActor, notify.NewRule{Entity: entities.ID(id), Kind: notify.KindState, Cooldown: zero()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.stub.reply = func(n int) *stubReply {
+		if n <= 3 {
+			return &stubReply{403, `{"code":50013}`}
+		}
+		return nil
+	}
+	cancel, done := a.run()
+	defer func() { cancel(); <-done }()
+	a.clk.await(t, 1)
+	for _, id := range ids[:3] {
+		a.eng.OnChange(a.change(id, "off", "on", monitor.SourceLive))
+	}
+	a.stub.waitPosts(3)
+	deadline := time.After(stubWait)
+	for !a.eng.Health().BreakerOpen {
+		select {
+		case <-deadline:
+			t.Fatal("the breaker must open")
+		case <-time.After(time.Millisecond): // poll an in-process counter without burning the CPU quota
+		}
+	}
+	if line := a.admin.HealthLine(); !strings.Contains(line, "Degraded") {
+		t.Fatalf("health while broken: %q", line)
+	}
+	a.clk.Advance(61 * time.Second) // the probe interval
+	a.clk.await(t, 1)
+	a.eng.OnChange(a.change(ids[3], "off", "on", monitor.SourceLive))
+	a.stub.waitPosts(4) // the probe
+	for a.eng.Health().BreakerOpen || a.eng.Health().Delivered == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("a successful probe must close the breaker")
+		case <-time.After(time.Millisecond): // poll an in-process counter without burning the CPU quota
+		}
+	}
+	a.eng.OnChange(a.change(ids[4], "off", "on", monitor.SourceLive))
+	a.stub.waitPosts(5)
+	a.clk.Advance(11 * time.Minute) // lets the 'alerts were dropped' window pass
+	a.clk.await(t, 1)
+	if line := a.admin.HealthLine(); !strings.Contains(line, "Enabled") {
+		t.Errorf("health must return to normal after recovery: %q", line)
+	}
+}
+
+func TestE2E_configurationSurvivesARestart_andTheExistingStateStaysSilent(t *testing.T) {
+	a := newAFix(t, false, nil)
+	a.ready("binary_sensor.door", monitor.CategoryDoor)
+	if _, err := a.admin.SetChannel(ctx0, adminActor, stubChannel); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.admin.AddRule(ctx0, adminActor, notify.NewRule{Entity: "binary_sensor.door", Kind: notify.KindState, Cooldown: zero()}); err != nil {
+		t.Fatal(err)
+	}
+	// The process restarts: a brand new engine on the same database, door already open.
+	a.tracker.Apply(monitor.Update{ID: "binary_sensor.door", Category: monitor.CategoryDoor, Name: "Front door", Raw: "on", LastChanged: a.now, LastUpdated: a.now}, a.now)
+	restarted, err := notify.NewEngine(notify.EngineDeps{Store: a.store, GuildID: stubGuild, Access: a.perms, Sensors: a.tracker, Status: a.stat, Sender: a.n,
+		Config: notify.EngineConfig{Rand: func(n int64) int64 { return n - 1 }}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.Reload(ctx0); err != nil || !restarted.Health().Active {
+		t.Fatalf("the persisted configuration must be active after a restart: %v", err)
+	}
+	runCtx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { restarted.Run(runCtx); close(done) }()
+	defer func() { cancel(); <-done }()
+	restarted.OnChange(a.change("binary_sensor.door", "", "on", monitor.SourceSnapshot)) // the new session's first look
+	restarted.OnChange(a.change("binary_sensor.door", "on", "off", monitor.SourceLive))
+	restarted.OnChange(a.change("binary_sensor.door", "off", "on", monitor.SourceLive))
+	a.stub.waitPosts(1)
+	if n := len(a.stub.postsSnapshot()); n != 1 || restarted.Health().Enqueued != 1 {
+		t.Errorf("an already-open door is silent after a restart and only the real transition alerts: %d", n)
 	}
 }

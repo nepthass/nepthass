@@ -119,6 +119,12 @@ type Engine struct {
 	reseed atomic.Bool
 	kick   chan struct{}
 
+	// reloadMu serializes Reload so the stored state is always the latest read;
+	// reloadFailed is true while the persisted configuration differs from the
+	// running one because a reload failed.
+	reloadMu     sync.Mutex
+	reloadFailed atomic.Bool
+
 	states         map[int64]*ruleState // evaluator goroutine only
 	lastDigest     time.Time            // evaluator goroutine only
 	resyncMu       sync.Mutex
@@ -173,6 +179,17 @@ func (e *Engine) OnChange(c monitor.Change) {
 // resumed or no longer present have their runtime state re-seeded from the
 // current sensor, so enabling a rule never alerts for a state that already existed.
 func (e *Engine) Reload(ctx context.Context) error {
+	e.reloadMu.Lock()
+	defer e.reloadMu.Unlock()
+	err := e.reload(ctx)
+	e.reloadFailed.Store(err != nil)
+	if err != nil {
+		e.log.Error("notification configuration could not be loaded; the previous configuration stays in force and the engine retries", "error", err)
+	}
+	return err
+}
+
+func (e *Engine) reload(ctx context.Context) error {
 	st, ok, err := e.d.Store.GetSettings(ctx, e.d.GuildID)
 	if err != nil {
 		return err
@@ -465,6 +482,9 @@ func (e *Engine) maybeDigest(ctx context.Context, rs *ruleSet) {
 // with no state transition to wake a waiter.
 func (e *Engine) runWatcher(ctx context.Context) {
 	for {
+		if e.reloadFailed.Load() {
+			_ = e.Reload(ctx) // safe recovery: keep trying until the saved configuration is active
+		}
 		if e.sampleHealth() {
 			return
 		}
@@ -582,6 +602,9 @@ type Health struct {
 	SuppressedCooldown, SuppressedUnshared                             uint64
 	Digests, Abandoned                                                 uint64
 	PendingAtShutdown                                                  int64
+	// ConfigStale is true while the saved configuration is NOT the running one
+	// (a reload failed). The engine keeps the previous configuration and retries.
+	ConfigStale bool
 }
 
 // Health reports counters and whether notifications are degraded: an alert was
@@ -603,6 +626,10 @@ func (e *Engine) Health() Health {
 		DroppedShutdown: e.m.droppedShutdown.Load(), DroppedCancelled: e.m.droppedCancelled.Load(),
 		SuppressedCooldown: e.m.suppressedCooldown.Load(), SuppressedUnshared: e.m.suppressedUnshared.Load(),
 		Digests: e.m.digests.Load(), Abandoned: e.m.abandoned.Load(), PendingAtShutdown: e.atShutdown.Load()}
+	h.ConfigStale = e.reloadFailed.Load()
+	if h.ConfigStale {
+		h.Reasons = append(h.Reasons, "saved configuration is not active (reload failed; retrying)")
+	}
 	if last := e.m.lastDropNanos.Load(); last != 0 && now.Sub(time.Unix(0, last)) < e.cfg.DegradedWindow {
 		h.Reasons = append(h.Reasons, "alerts were dropped recently")
 	}

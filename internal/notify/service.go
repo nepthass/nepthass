@@ -95,6 +95,32 @@ func (s *Service) mutate(ctx context.Context, actor auth.Actor, e audit.Entry, f
 	return nil
 }
 
+// ErrChannelRejected and ErrTestFailed are fixed sentinels for administrative
+// actions that are refused before (or without) a stored change; their text is
+// all the audit log ever receives about them.
+var (
+	ErrChannelRejected = errors.New("channel rejected")
+	ErrTestFailed      = errors.New("test message not delivered")
+)
+
+// Record audits an administrative action that is not a stored change: a denied
+// attempt, a rejected channel, a test message. cause maps to a fixed sentinel
+// message (see sanitized), never to caller text; nil records a success. The
+// write is best effort and bounded, like the audit of a refused mutation.
+func (s *Service) Record(ctx context.Context, actor auth.Actor, command, action string, cause error) {
+	e := audit.Entry{Time: s.d.Now(), ActorID: actor.UserID, Command: command, Action: action}
+	if cause != nil {
+		s.auditRefused(ctx, e, cause)
+		return
+	}
+	e.Outcome = audit.OutcomeSuccess
+	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), auditTimeout)
+	defer cancel()
+	if err := s.d.Audit.Record(actx, e); err != nil {
+		s.d.Logger.Error("audit write failed", "command", e.Command, "error", err)
+	}
+}
+
 // auditRefused records a denied or failed attempt, outside any transaction.
 func (s *Service) auditRefused(ctx context.Context, e audit.Entry, cause error) {
 	e.Outcome = audit.OutcomeError
@@ -117,6 +143,7 @@ func isDenial(err error) bool {
 // database error, a wrapped message) is stored as "internal error", so the audit
 // log never receives text that could carry a sensor value, a path or a secret.
 var known = []error{
+	ErrChannelRejected, ErrTestFailed,
 	auth.ErrAdminRequired, auth.ErrNotAuthorized, ErrNotConfigured, ErrInvalidChannel, ErrInvalidEntity, ErrInvalidKind,
 	ErrInvalidThreshold, ErrInvalidCooldown, ErrNotShared, ErrNotMonitored, ErrIncompatible, ErrRuleLimit, ErrRuleExists, ErrRuleNotFound,
 }

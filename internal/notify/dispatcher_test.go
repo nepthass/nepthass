@@ -351,8 +351,7 @@ func awaitNoGoroutines(t *testing.T, markers ...string) {
 		select {
 		case <-deadline:
 			t.Fatalf("goroutines still running: %v", goroutinesIn(markers...))
-		default:
-			runtime.Gosched()
+		case <-time.After(time.Millisecond): // poll without burning the CPU quota
 		}
 	}
 }
@@ -402,4 +401,36 @@ func TestDispatcher_shutdownIsBoundedEvenWhenASendIgnoresCancellation(t *testing
 	}
 	close(gate) // let the abandoned call finish
 	awaitNoGoroutines(t, engineGoroutines...)
+}
+
+// advancingClock moves time forward just before a timer is registered, which is
+// what a real clock does in the gap between reading Now and calling After.
+type advancingClock struct {
+	*fakeClock
+	once sync.Once
+	jump time.Duration
+}
+
+func (c *advancingClock) After(d time.Duration) <-chan time.Time {
+	c.once.Do(func() { c.fakeClock.Advance(c.jump) })
+	return c.fakeClock.After(d)
+}
+
+func TestDispatcher_doesNotSleepThroughAWakeUpTimeThatPassedWhileItRegisteredItsTimer(t *testing.T) {
+	f := newDFix(nil)
+	f.d.clock = &advancingClock{fakeClock: f.clk, jump: 3 * time.Second}
+	it := f.alert("door.a", monitor.CategoryDoor)
+	it.notBefore = f.clk.Now().Add(time.Second) // eligible after one second
+	f.q.push(it, false)
+	select { // the push left a wake-up token; only the timer may wake the dispatcher in this test
+	case <-f.q.wake:
+	default:
+	}
+	runCtx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { f.d.run(runCtx); close(done) }()
+	f.snd.waitCalls(t, 1) // without the re-check the dispatcher would sleep until a later Advance that never comes
+	cancel()
+	f.clk.Advance(time.Hour) // releases the shutdown drain timer
+	<-done
 }

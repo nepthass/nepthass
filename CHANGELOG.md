@@ -6,6 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+Fourth milestone: smart notifications (`feature/v0.4.0`, not released).
+
+### Added
+
+- Ordered change feed from the monitor tracker (`Change` with a strictly increasing sequence, source live/replay/snapshot, previous and current state) delivered through `Config.OnChange` after the tracker lock is released.
+- Notification configuration in SQLite (migration `0003`: `notification_settings`, `notification_rules`), an administrator-only service with an atomic audit entry per change, at most 200 rules, thresholds within +/-1,000,000, cooldowns up to 24 hours.
+- Notification engine (`internal/notify`): a per-entity mailbox that never blocks the monitor callback, a pure rule evaluator (door/window open, motion detected, leak wet, battery low, temperature/humidity/battery above or below), per-rule cooldowns with category defaults, two bounded delivery lanes (critical 32, normal 64) with a 10 minute absolute TTL, a dispatcher with exponential backoff, a token bucket and a circuit breaker, a current-state digest after overflow, and a monitoring-down state machine (one alert after five unhealthy minutes, recovery notice only after the alert was delivered).
+- Discord delivery over REST with explicit empty allowed-mentions, one retry layer, and classified errors (429 with `retry_after`, 5xx and network errors retried, 401/403/404/400 permanent).
+- `/notifications` (administrators, guild-only, ephemeral): `channel`, `add`, `list`, `pause`, `resume`, `remove`, `test`, `status`, with autocomplete limited to shared, monitored sensors. Channel validation: the channel exists, belongs to the configured guild, is a text channel, and the bot has View Channel, Send Messages and Embed Links.
+- A notification line in `/health` and detailed delivery health in `/notifications status`.
+- Interaction parsing for Channel and Number options; any other option type makes the request fail visibly instead of running without it.
+- Documentation: [docs/design/notifications.md](docs/design/notifications.md), command reference, security notes, troubleshooting and a real-Discord manual QA checklist.
+
+### Changed
+
+- The recovery notice is queued ahead of the late alerts found by the reconnect snapshot.
+- Rejected, denied and test actions of `/notifications` are audited with fixed sentinel wording only.
+- A configuration change that is saved but could not be loaded into the running engine is reported as "saved but not active", shows degraded health, and is retried automatically; health never reports "disabled" in that state.
+
+### Security
+
+- Sharing is checked before an alert is produced and again before every delivery attempt; a revocation that lands after the last check but before Discord accepts the request cannot be recalled.
+- Messages never contain entity IDs, raw attributes or credentials, names are escaped, and no mention of any kind is sent.
+- Everyone who can read the alert channel sees the alerts. Use a private channel.
+
+### Upgrade notes
+
+- Migration `0003` only adds tables. **Back up the database before upgrading.** A v0.3.0 binary refuses a database that has migration `0003` ("database schema is newer than this build supports"); to go back, restore the backup.
+- Notifications are disabled until an administrator sets a channel.
+
+### Known limitations
+
+- There is **no persisted outbox**: queued alerts are lost on a crash or restart. Delivery is best-effort with possible duplicates and a 10 minute TTL.
+- A first observation is silent, so a leak that is already wet when NeptHass starts or when its rule is created is not announced.
+- One alert channel per server; no direct messages, quiet hours or rule logic (v0.5.0).
+- Delivery to real Discord has not been tested against a live server: see the pending checklist in [docs/development/smoke-tests.md](docs/development/smoke-tests.md).
+
 ## [0.3.0] - 2026-10-29
 
 Third milestone: real-time sensor monitoring. Notifications are not part of it.

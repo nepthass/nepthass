@@ -106,6 +106,11 @@ func (d *dispatcher) run(ctx context.Context) {
 		var timer <-chan time.Time
 		if !next.IsZero() {
 			timer = d.clock.After(next.Sub(now))
+			if !d.clock.Now().Before(next) {
+				// The clock moved past the wake-up time between reading it and registering
+				// the timer, which is relative to the new time: do not sleep through it.
+				continue
+			}
 		}
 		select {
 		case <-d.q.wake:

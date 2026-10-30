@@ -60,7 +60,19 @@ Two boundaries exist and must not be confused:
 
 Privacy notes: sensor values live in process memory only and are lost on restart; unshared sensors are held in that memory too (tracking is not exposure); the sensor list a person sees through `/sensors` is Discord-visible like any other reply.
 
-Known limitations of monitoring: it observes only. It does not notify anyone, so it is not an alarm. A change that happens and reverses while NeptHass is disconnected leaves no trace. TLS uses the system trust store, as the REST client does (no custom CA or insecure option).
+Known limitations of monitoring: it observes only. On its own it notifies no one; notifications (v0.4.0, below) are a separate best-effort layer, and neither is a certified alarm system. A change that happens and reverses while NeptHass is disconnected leaves no trace. TLS uses the system trust store, as the REST client does (no custom CA or insecure option).
+
+## Notifications (v0.4.0)
+
+- **Administrators only.** `/notifications` requires the administrator level. A non-administrator attempt is refused before anything reaches Discord or the database and is audited as denied.
+- **Audit.** Every change is audited in the same transaction. Denied and failed actions are audited as well: a rejected channel is recorded with a fixed reason code (for example `rejected_not_text`), a test message with its outcome. The audit log receives only fixed sentinel wording, never user input, Discord error text, tokens or sensor values (anything unrecognized is stored as "internal error"). A successful channel change records the new channel ID, which is not a secret.
+- **Sharing is the gate.** An alert is produced only for an entity shared at `read` or higher, and sharing is read again immediately before every delivery attempt, including retries and each line of a digest. Revoking an entity stops its alerts and leaves its rules dormant. **Unavoidable race:** a revocation that lands after that last check and before Discord accepts the request cannot be recalled; the window is one HTTP request.
+- **Channel visibility is the privacy boundary.** Everyone who can read the alert channel sees the alerts (sensor names and states), regardless of their own NeptHass access. Choose a private channel. NeptHass verifies the channel's guild, type and the bot's permissions when it is chosen, and notices permission loss or deletion on the next send; it cannot see who can read the channel.
+- **What a message contains.** A display name (alias, else friendly name, else a generic label), a state or value with its unit, and times. Never an entity ID, raw attribute, token or credential. Names are escaped and every message is sent with an empty allowed-mentions list: nothing can ping a user, role or `@everyone`.
+- **Autocomplete and status.** Autocomplete is administrator-only and limited to shared, monitored sensors; `list` and `status` show rules by name. `/health` shows one non-sensitive line to every allowed user.
+- **No secrets in logs or audit.** The Discord token is never logged; delivery failures are logged by category only.
+- **Reliability is not security-critical state.** The queue is in memory. A crash or restart loses pending alerts (no persisted outbox), and delivery can duplicate a message after an ambiguous failure.
+- **Not an alarm.** Notifications are best-effort with a 10 minute staleness bound. Do not rely on them for life-safety.
 
 ## Reporting a vulnerability
 
