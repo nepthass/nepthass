@@ -6,7 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-Fifth milestone: richer rules and safer start-up (implemented on `feature/v0.5.0`, not yet released; manual Discord QA is pending).
+## [0.5.0] - 2026-10-31
+
+Fifth milestone: richer rules and safer start-up. Verified by 474 automated tests, 48 tests against a real Home Assistant and the mandatory real-Discord smoke checks; see the [release readiness report](docs/development/v0.5.0-release-readiness.md).
 
 ### Added
 
@@ -37,7 +39,7 @@ Fifth milestone: richer rules and safer start-up (implemented on `feature/v0.5.0
 - Duration counts are in memory: after a restart or a monitoring outage they restart, so an alert can be later than the real duration (never earlier).
 - Smoke, gas and carbon monoxide are not supported; they need a dedicated safety policy.
 - No persisted outbox, a 10 minute staleness bound, one alert channel and possible duplicates remain as in v0.4.0.
-- Manual QA on a real Discord server has not been run for v0.5.0; see the checklist (group J) in [docs/development/smoke-tests.md](docs/development/smoke-tests.md).
+- Real-Discord QA covered the mandatory smoke checks only (start-up alerts and summary, authorization and audit). The optional check for a channel without Send Messages (V32) was not run, and the other rows of group J are verified by automated tests against a stub Discord server; see [docs/development/smoke-tests.md](docs/development/smoke-tests.md).
 
 ## [0.4.0] - 2026-10-30
 
@@ -194,7 +196,8 @@ First milestone: the foundation.
 - A single Discord guild is supported.
 - `/devices` lists 10 entities per page via a `page` option; interactive pagination arrives with the dashboard.
 
-[Unreleased]: https://github.com/nepthass/nepthass/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/nepthass/nepthass/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/nepthass/nepthass/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/nepthass/nepthass/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nepthass/nepthass/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nepthass/nepthass/compare/v0.1.0...v0.2.0

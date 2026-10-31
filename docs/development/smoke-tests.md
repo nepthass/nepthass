@@ -65,7 +65,7 @@ The ordinary unit tests (`go test -race ./...`) additionally cover the Discord i
 
 ### Rules, start-up and audit tests (v0.5.0)
 
-Against the real Home Assistant, with the recording sender: Home Assistant's `garage_door` and `opening` classes alert when they open; a duration rule on a real door never fires a second early and fires once (injected clock); a door that closes before its duration never alerts; hysteresis through real temperature setpoints (31, 29, 31, 28, 31, 27, 31) alerts only after a clear; a leak that is already wet at start is announced once and not again after a restart (persisted mark), or announced as "what Home Assistant reports" when no mark exists; and sensors already open at start are listed in one summary. The unit and denial-audit behaviors are covered by the unit, end-to-end and interaction tests (a unit change cannot be produced through Home Assistant's API in the isolated stack), not by this suite.
+Against the real Home Assistant, with the recording sender: Home Assistant's `garage_door` and `opening` classes alert when they open; a duration rule on a real door never fires a second early and fires once (injected clock); a door that closes before its duration never alerts; hysteresis through real temperature setpoints (31, 29, 31, 28, 31, 27, 31) alerts only after a clear; a leak that is already wet at start is announced once and not again after a restart (persisted mark), or announced as "what Home Assistant reports" when no mark exists; sensors already open at start are listed in one summary; **a real unit change** (the instance is switched to US customary units, so Home Assistant itself reports the temperature in °F) makes a °C-bound rule dormant and it resumes when the unit returns; and **a real outage** (the WebSocket connection is cut) while a duration is pending fires nothing during the outage, restarts the count on recovery and says "at least". The denial audit and the `/notifications unit` command are covered by the unit, end-to-end and interaction tests, not by this suite.
 
 ## 2. Manual Discord checklist
 
@@ -255,7 +255,7 @@ Not covered by any row because it needs special conditions: the 200-rule limit a
 
 ### J. v0.5.0 rules, units, start-up alerts and audit (real Discord)
 
-**Not executed yet.** This checklist has no result column on purpose: record results (PASS, FAIL, BLOCKED, NOT TESTED or DEFERRED) in your own notes, never in this repository, and mark a row PASS only if you ran it and saw the result. Automated tests are not a substitute for these rows.
+**Results are not recorded in this file.** This checklist has no result column on purpose: record results (PASS, FAIL, BLOCKED, NOT TESTED or DEFERRED) in your own notes, never in this repository, and mark a row PASS only if you ran it and saw the result. Automated tests are not a substitute for these rows. On 2026-10-31 the maintainer ran the two mandatory smoke checks M1 (start-up alert, summary and deduplication) and M2 (authorization and audit) from the [release readiness report](v0.5.0-release-readiness.md) and reported both as passed; the optional M3 (V32) was not run.
 
 **Setup.** A dedicated test server (never production); the dev stack with the `app` profile built from `feature/v0.5.0`; run the `NeptHass Dev: reset to baseline` script; share the nine virtual sensors with `/setup`; a **private** text channel where the bot has View Channel, Send Messages and Embed Links; `/notifications channel`. Use the NeptHass Dev dashboard (or the scenario scripts) to create every event: **no real hazard, smoke or gas is ever needed.** Durations below use the 2 minute setting; the minimum is 1 minute. Restarting NeptHass only: `docker compose --env-file .env.dev -f compose.dev.yaml --profile app restart nepthass`. Never touch the `nepthass-dev_*` data volumes; for the upgrade rows use a **copy** of a v0.4.0 database in a separate volume.
 
@@ -285,12 +285,12 @@ Not covered by any row because it needs special conditions: the 200-rule limit a
 | V22 | As a non-administrator and as an administrator: `/notifications unit rule:<temperature rule>` | Refused for the non-administrator; for the administrator it binds to the sensor's current unit and the rule evaluates; running it again is refused ("never rebound"); autocomplete offered only that rule |
 | V23 | Turn the water leak helper on, restart NeptHass | One critical alert: wet according to Home Assistant, "not a new event", when it was last updated, "please check it"; no earlier alert |
 | V24 | Restart NeptHass again straight away, then again after 20 minutes (leak still on, Home Assistant not restarted) | No second alert either time |
-| V25 | Restart Home Assistant and, 20 minutes after the first alert, NeptHass (leak still on) | One reminder alert (the episode identity changed) |
+| V25 | Leak on, restart NeptHass (the first alert). Stop NeptHass, turn the leak off and on again (a new episode: the simulation resets on a Home Assistant restart, so do not rely on one), wait until 20 minutes after the first alert, start NeptHass | One reminder alert (the leak's last-changed time is a new episode identity) |
 | V26 | Open the door, the window, the garage door and the opening (immediate rules on each), restart NeptHass | No individual alerts; one start-up summary about 2 minutes after the start that lists the open ones by name |
 | V27 | Restart again within 10 minutes, then after 10 minutes | No summary within 10 minutes; a new one after |
 | V28 | Turn every offline helper on, restart NeptHass, wait 3 minutes; then turn the leak on and the leak's offline helper off | Nothing sent at the start; when the leak sensor returns wet one "uncertain" alert (not a start-up alert) |
 | V29 | Create a door rule on an already open door; create a leak rule on a wet leak sensor | The door reply says nothing is sent now and no summary ever lists it; the leak reply says an alert is on its way and one arrives |
-| V30 | Restart only Home Assistant | No start-up alert or summary (a reconnect is not a start); a change that happened during the outage is reported as detected after reconnecting |
+| V30 | Restart only Home Assistant (the simulation returns to baseline) | No start-up alert or summary (a reconnect is not a start). A change hidden by an outage and reported as late is covered by the automated outage tests, because a restart cannot produce one in the simulation |
 | V31 | Pause all notifications, or unshare the sensor, then restart with the leak wet | Nothing sent |
 | V32 | Remove the bot's Send Messages permission in the alert channel, restart with the leak wet; restore it and restart again | The first attempt fails (visible in `status`), no mark is kept, the next start announces it |
 | V33 | As a non-administrator run `/notifications add` and `/permissions allow` | Refused with the usual message; `/audit` shows denied rows with reason not_admin, the command and subcommand names, and no sensor name or option value |
@@ -303,7 +303,7 @@ Not testable with the virtual devices: more than three simultaneous hazards (the
 
 ## Known gaps
 
-**v0.5.0 (group J):** the checklist above has not been run. In particular nothing about the start-up behavior, the durations, the units or the denial audit has been seen on real Discord. The automated tests use a stub Discord server, so they prove NeptHass's requests and decisions, not what Discord shows.
+**v0.5.0 (group J):** the two mandatory real-Discord smoke checks (M1 start-up alert, summary and deduplication; M2 authorization and audit) were run by the maintainer on 2026-10-31 and passed (user-reported); the optional M3 (a channel without Send Messages, V32) was not run, and the remaining rows rely on automated tests. The automated tests use a stub Discord server, so they prove NeptHass's requests and decisions, not what Discord shows.
 
 What the automated tests do not prove, and what is still checked by hand:
 

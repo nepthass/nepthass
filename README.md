@@ -32,7 +32,7 @@ NeptHass is **pre-1.0** and is developed milestone by milestone in a private rep
 | v0.2.0 | Interactive `/setup` wizard, entity discovery, aliases, `/sync` | Released |
 | v0.3.0 | Home Assistant WebSocket, real-time sensor monitoring | Released |
 | v0.4.0 | Smart notifications and monitoring-down notices | Released |
-| v0.5.0 | Richer rules and safer start-up: durations, hysteresis, unit-safe thresholds, start-up alerting, audit of refused commands, garage door and opening sensors | **Implemented on `feature/v0.5.0`; manual QA pending; not released** |
+| v0.5.0 | Richer rules and safer start-up: durations, hysteresis, unit-safe thresholds, start-up alerting, audit of refused commands, garage door and opening sensors | Released |
 | v0.6.0 and later | See the [roadmap](docs/roadmap.md) | Planned |
 
 Release history: [CHANGELOG.md](CHANGELOG.md).

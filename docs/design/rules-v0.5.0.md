@@ -1,6 +1,6 @@
 # v0.5.0 design: rule semantics, safe start-up and a sensor capability registry
 
-**Status: implemented on `feature/v0.5.0`; automated verification done, manual Discord QA pending; not released. Decisions D1 to D5 (and the follow-up decisions U1 to U6) are final.** The sections below are the design as approved; the table in "Implementation notes" lists where the implementation went beyond or differs from it. This replaces the earlier proposal text (Git history keeps it). It builds on the shipped design in [notifications.md](notifications.md) and on the [architecture](../architecture.md).
+**Status: released in v0.5.0 (2026-10-31); automated verification done and the mandatory real-Discord smoke checks passed. Decisions D1 to D5 (and the follow-up decisions U1 to U6) are final.** The sections below are the design as approved; the table in "Implementation notes" lists where the implementation went beyond or differs from it. This replaces the earlier proposal text (Git history keeps it). It builds on the shipped design in [notifications.md](notifications.md) and on the [architecture](../architecture.md).
 
 ## 1. Summary
 
