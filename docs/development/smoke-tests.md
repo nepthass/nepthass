@@ -62,6 +62,11 @@ The ordinary unit tests (`go test -race ./...`) additionally cover the Discord i
 
 `tests/integration/notifications_test.go` runs the real chain **real Home Assistant -> real monitor -> real notification engine -> recording sender** against the dev stack's virtual sensors: a door opening and closing, motion, a water leak, a leak returning wet from unavailable, temperature above and battery below a threshold, cooldown, revocation, an already-open door at startup, a real network outage (through the TCP proxy) that hides an opening and yields a late alert, a five-minute disconnect with a down alert and a recovery notice (injected clock), a Discord outage that recovers through retries, queue saturation with a current-state digest, and a restart with persisted configuration. **Discord itself is replaced by a recording sender here.** The Discord REST adapter is covered separately by `internal/discord` tests against a **stub REST server**, which prove NeptHass's side of the protocol, not Discord's behaviour.
 
+
+### Rules, start-up and audit tests (v0.5.0)
+
+Against the real Home Assistant, with the recording sender: Home Assistant's `garage_door` and `opening` classes alert when they open; a duration rule on a real door never fires a second early and fires once (injected clock); a door that closes before its duration never alerts; hysteresis through real temperature setpoints (31, 29, 31, 28, 31, 27, 31) alerts only after a clear; a leak that is already wet at start is announced once and not again after a restart (persisted mark), or announced as "what Home Assistant reports" when no mark exists; and sensors already open at start are listed in one summary. The unit and denial-audit behaviors are covered by the unit, end-to-end and interaction tests (a unit change cannot be produced through Home Assistant's API in the isolated stack), not by this suite.
+
 ## 2. Manual Discord checklist
 
 Preconditions (all must be true before starting):
