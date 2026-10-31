@@ -64,6 +64,11 @@ type Message struct {
 	// Muted counts alerts for this rule suppressed by its cooldown since the
 	// previous alert.
 	Muted int
+	// Duration is the configured duration of a duration rule (zero: an immediate
+	// alert). HeldAtLeast is true when NeptHass did not see the condition begin, so
+	// it held for AT LEAST Duration as far as NeptHass knows.
+	Duration    time.Duration
+	HeldAtLeast bool
 
 	// Lines and MoreLines describe a digest: the current state of up to ten
 	// still-violating rules, and how many more there were.

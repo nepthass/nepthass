@@ -35,7 +35,15 @@ import (
 // evaluated (the latch dies with the entity: it can no longer be checked for
 // sharing or monitoring). Order is preserved per entity (a slot is one entity)
 // and slots are drained in the order they first became dirty.
-const maxLatches = 2 // an entity has at most an "above" and a "below" rule
+//
+// Stateful rules (a duration or a clear value, see cachedRule.stateful) cannot
+// live with coalescing: a duration rule must know whether the condition stayed
+// continuous, and a hysteresis rule the order of its crossings. For an entity
+// with such a rule the slot therefore also keeps an ordered TRAIL of the
+// changes, bounded by maxTrail. If the trail overflows, the oldest changes are
+// dropped and trailLost is set, which makes the evaluator treat the continuity
+// as unknown (it cancels pending episodes instead of guessing).
+const maxTrail = 16
 
 type latch struct {
 	rule           int64
@@ -55,14 +63,18 @@ type slot struct {
 	lastSeq     uint64
 	lastSource  monitor.ChangeSource
 	anySnapshot bool
-	nLatch      int
-	latches     [maxLatches]latch
+	// latches holds the first qualifying transition of each plain rule: at most one
+	// per rule of the entity, so its size is bounded by the number of rules.
+	latches []latch
+	// trail and trailLost serve stateful rules only.
+	trail     []monitor.Change
+	trailLost bool
 }
 
 func (s *slot) latchFor(rule int64) (latch, bool) {
-	for i := 0; i < s.nLatch; i++ {
-		if s.latches[i].rule == rule {
-			return s.latches[i], true
+	for _, l := range s.latches {
+		if l.rule == rule {
+			return l, true
 		}
 	}
 	return latch{}, false
@@ -116,22 +128,33 @@ func (m *mailbox) record(c monitor.Change, rules []cachedRule) {
 	}
 	if c.Removed {
 		s.removed, s.reset, s.haveCur = true, true, false
-		s.cur, s.nLatch = monitor.Sensor{}, 0
+		s.cur, s.latches, s.trail, s.trailLost = monitor.Sensor{}, nil, nil, false
 	} else {
 		s.removed, s.haveCur, s.cur = false, true, c.Cur
 		if !c.HadPrev {
 			s.reset = true
 		}
+		stateful := false
 		for _, r := range rules {
+			if r.stateful() {
+				stateful = true
+				continue
+			}
 			qualifies, fromUnreliable := enters(r, c)
 			if !qualifies {
 				continue
 			}
-			if _, dup := s.latchFor(r.ID); dup || s.nLatch >= maxLatches {
+			if _, dup := s.latchFor(r.ID); dup {
 				continue // keep the first qualifying transition
 			}
-			s.latches[s.nLatch] = latch{rule: r.ID, seq: c.Seq, source: c.Source, at: c.At, sensor: c.Cur, fromUnreliable: fromUnreliable}
-			s.nLatch++
+			s.latches = append(s.latches, latch{rule: r.ID, seq: c.Seq, source: c.Source, at: c.At, sensor: c.Cur, fromUnreliable: fromUnreliable})
+		}
+		if stateful {
+			if len(s.trail) >= maxTrail {
+				s.trail = append(s.trail[:0:0], s.trail[1:]...)
+				s.trailLost = true
+			}
+			s.trail = append(s.trail, c)
 		}
 	}
 	m.slots[c.ID] = s

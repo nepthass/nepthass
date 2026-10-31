@@ -93,7 +93,7 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 		Sensors: mon.Tracker(), Audit: auditLog, Now: time.Now, Logger: log})
 	notifier := discord.NewNotifier(cfg.Discord.GuildID, notifyStore, log)
 	engine, err := notify.NewEngine(notify.EngineDeps{Store: notifyStore, GuildID: cfg.Discord.GuildID, Access: perms, Sensors: mon.Tracker(),
-		Aliases: aliases, Status: mon, Sender: notifier, Logger: log})
+		Aliases: aliases, Status: mon, Sender: notifier, Binder: notifySvc, Logger: log})
 	if err != nil {
 		return err
 	}

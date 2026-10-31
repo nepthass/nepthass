@@ -13,8 +13,22 @@ type cachedRule struct {
 	Entity    entities.ID
 	Kind      Kind
 	Threshold float64
-	Cooldown  *time.Duration
+	// Clear is the re-arm value of a numeric rule (hysteresis), valid when HasClear.
+	Clear    float64
+	HasClear bool
+	// Unit is the unit the threshold is bound to ("" on a state rule, and on a
+	// numeric rule that predates unit binding, which then does not evaluate).
+	Unit string
+	// Duration is how long the condition must hold; zero is an immediate rule.
+	Duration time.Duration
+	Cooldown *time.Duration
 }
+
+// stateful reports whether the rule needs the ordered observation trail: a
+// duration rule must know whether the condition was continuous, and a hysteresis
+// rule must know the order of crossings. A plain immediate rule keeps the
+// coalescing latch of v0.4.0.
+func (r cachedRule) stateful() bool { return r.Duration > 0 || r.HasClear }
 
 // ruleSet is an immutable snapshot of the enabled rules. The engine swaps whole
 // snapshots atomically, so the monitor callback never takes a lock to read it
@@ -31,9 +45,12 @@ func newRuleSet(rules []Rule) *ruleSet {
 		if !r.Enabled || len(rs.byID) >= MaxRules {
 			continue
 		}
-		c := cachedRule{ID: r.ID, Entity: r.Entity, Kind: r.Kind, Cooldown: r.Cooldown}
+		c := cachedRule{ID: r.ID, Entity: r.Entity, Kind: r.Kind, Cooldown: r.Cooldown, Unit: r.Unit, Duration: r.Duration}
 		if r.Threshold != nil {
 			c.Threshold = *r.Threshold
+		}
+		if r.Clear != nil {
+			c.Clear, c.HasClear = *r.Clear, true
 		}
 		rs.byEntity[r.Entity] = append(rs.byEntity[r.Entity], c)
 		rs.byID[r.ID] = c
@@ -51,6 +68,45 @@ func reliable(s monitor.Sensor) bool {
 	return true
 }
 
+// unitOK reports whether the sensor reports the unit the rule's threshold is
+// bound to. A state rule has no unit. A numeric rule with no bound unit never
+// matches, so a threshold is never evaluated against a unit it was not written for.
+func unitOK(r cachedRule, s monitor.Sensor) bool {
+	return r.Kind == KindState || (r.Unit != "" && r.Unit == s.Unit)
+}
+
+// supports reports whether a sensor category's declared capabilities allow the
+// rule's shape: its kind, a duration, a clear value. A hazard (the water leak) is
+// immediate-only, so a duration or clear value on it is never honored, even if it
+// reached the database by some other route.
+func supports(k Kind, duration time.Duration, hasClear bool, c monitor.Category) bool {
+	if !compatible(k, c) {
+		return false
+	}
+	spec, _ := monitor.SpecFor(c) // compatible() guarantees the row
+	if duration > 0 {
+		need := monitor.CapStateDuration
+		if k != KindState {
+			need = monitor.CapThresholdDuration
+		}
+		if !spec.Caps.Has(need) {
+			return false
+		}
+	}
+	return !hasClear || spec.Caps.Has(monitor.CapHysteresis)
+}
+
+// usable reports whether the rule can evaluate this sensor at all: the category
+// supports the rule's shape and the unit matches. An unusable rule is dormant,
+// never wrong.
+func usable(r cachedRule, s monitor.Sensor) bool {
+	return supports(r.Kind, r.Duration, r.HasClear, s.Category) && unitOK(r, s)
+}
+
+// reliableFor is reliable plus the unit guard: a reading in a different unit is
+// not a reliable reading for this rule.
+func reliableFor(r cachedRule, s monitor.Sensor) bool { return reliable(s) && unitOK(r, s) }
+
 // alertMeaning is the state a state rule fires on, from the category's registry
 // row. A numeric or unknown category has none.
 func alertMeaning(c monitor.Category) (monitor.Meaning, bool) {
@@ -62,9 +118,12 @@ func alertMeaning(c monitor.Category) (monitor.Meaning, bool) {
 }
 
 // violates reports whether the sensor currently satisfies the rule. It is false
-// for an unreliable reading and for a sensor whose category does not fit the
-// rule kind (a dormant, incompatible rule never fires).
+// for an unreliable reading, for a reading in another unit, and for a sensor
+// whose category does not fit the rule kind (a dormant rule never fires).
 func violates(r cachedRule, s monitor.Sensor) bool {
+	if !unitOK(r, s) {
+		return false
+	}
 	in := s.Interpretation()
 	switch r.Kind {
 	case KindState:
@@ -78,20 +137,41 @@ func violates(r cachedRule, s monitor.Sensor) bool {
 	return false
 }
 
+// cleared reports whether the reading is past the rule's clear value, so a
+// hysteresis rule may fire again: strictly below it for an "above" rule, strictly
+// above it for a "below" rule. Equal does not clear.
+func cleared(r cachedRule, s monitor.Sensor) bool {
+	if !r.HasClear || !reliableFor(r, s) {
+		return false
+	}
+	in := s.Interpretation()
+	if !in.HasValue {
+		return false
+	}
+	switch r.Kind {
+	case KindAbove:
+		return in.Value < r.Clear
+	case KindBelow:
+		return in.Value > r.Clear
+	}
+	return false
+}
+
 // enters decides whether one Change is a qualifying transition for a rule: the
 // sensor was observed NOT violating and now violates. It needs no per-rule
 // runtime state, so the monitor callback can compute it.
 //
 //   - A first observation (HadPrev false) and a removal never qualify.
 //   - A reliable, non-violating previous state qualifies.
-//   - An unreliable previous state (unavailable, unknown, invalid) does not
-//     qualify, with one deliberate exception: a hazard sensor (a water leak) reaching its alert
-//     state fails loud (fromUnreliable is true so the message can say the state was uncertain).
+//   - An unreliable previous state (unavailable, unknown, invalid, or a reading in
+//     another unit) does not qualify, with one deliberate exception: a hazard
+//     sensor (a water leak) reaching its alert state fails loud (fromUnreliable is
+//     true so the message can say the state was uncertain).
 func enters(r cachedRule, c monitor.Change) (qualifies, fromUnreliable bool) {
 	if c.Removed || !c.HadPrev || !violates(r, c.Cur) || violates(r, c.Prev) {
 		return false, false
 	}
-	if reliable(c.Prev) {
+	if reliableFor(r, c.Prev) {
 		return true, false
 	}
 	if r.Kind == KindState && c.Cur.Category.Hazard() {

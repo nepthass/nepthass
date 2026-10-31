@@ -180,6 +180,7 @@ type counters struct {
 	droppedDisabled, droppedShutdown, droppedCancelled                            atomic.Uint64
 	suppressedCooldown, suppressedUnshared                                        atomic.Uint64
 	abandoned, digests                                                            atomic.Uint64
+	episodesStarted, episodesFired, episodesCancelled                             atomic.Uint64
 	lastDropNanos                                                                 atomic.Int64
 }
 

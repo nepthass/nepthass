@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"io"
@@ -86,17 +87,40 @@ type EngineDeps struct {
 	Aliases AliasSource // optional
 	Status  StatusSource
 	Sender  Sender
-	Clock   Clock // defaults to the wall clock
+	Binder  UnitBinder // optional: binds legacy numeric rules to their unit
+	Clock   Clock      // defaults to the wall clock
 	Logger  *slog.Logger
 	Config  EngineConfig
 }
 
+// UnitBinder binds numeric rules created before unit binding (see
+// Service.BindLegacyUnits). It is optional.
+type UnitBinder interface {
+	BindLegacyUnits(ctx context.Context) (int, error)
+}
+
+// ruleState is the evaluator's memory of one rule. It lives in memory only and is
+// owned by the evaluator goroutine.
 type ruleState struct {
-	baselined bool // the rule has seen a reliable state to compare against
-	active    bool // a violation episode is in progress (re-arms when reliably clear)
+	baselined bool   // the rule has seen a reliable state to compare against
+	armed     bool   // the rule may fire; false after it fires, until it re-arms
+	unit      string // the unit the rule was bound to when this state was made
+	ep        *episode
 	hasFired  bool
 	lastFired time.Time
 	muted     int
+}
+
+// episode is a pending duration: the condition has been seen violating since
+// start and the rule fires at due if the sensor still violates it then. Time is
+// NeptHass's own clock only (never Home Assistant's last_changed), and start is
+// never earlier than the moment NeptHass observed the condition, so an alert can
+// be late but never early. exact is true when NeptHass saw the transition live;
+// otherwise the condition may have held longer, and the message says "at least".
+type episode struct {
+	start time.Time
+	due   time.Time
+	exact bool
 }
 
 // Engine turns monitor changes into alerts. It owns three goroutines (evaluator,
@@ -118,6 +142,15 @@ type Engine struct {
 
 	reseed atomic.Bool
 	kick   chan struct{}
+
+	// monitoringOK mirrors Status.Healthy and gates duration alerts: a duration is
+	// never claimed while Home Assistant cannot be watched. When monitoring comes
+	// back, pending episodes are re-seeded from the current sensors (reseedDur),
+	// because continuity during the outage cannot be proven.
+	monitoringOK atomic.Bool
+	reseedDur    atomic.Bool
+	pendingEps   atomic.Int64
+	bindWake     chan struct{}
 
 	// reloadMu serializes Reload so the stored state is always the latest read;
 	// reloadFailed is true while the persisted configuration differs from the
@@ -153,7 +186,8 @@ func NewEngine(d EngineDeps) (*Engine, error) {
 	d.Config.withDefaults()
 	c := d.Config
 	e := &Engine{d: d, cfg: c, clock: d.Clock, log: d.Logger, mb: newMailbox(MaxRules), q: newQueue(c.CriticalCap, c.NormalCap),
-		down: newDownMachine(d.Clock.Now(), c.DownAfter), kick: make(chan struct{}, 1), states: map[int64]*ruleState{}, resync: map[int64]struct{}{}}
+		down: newDownMachine(d.Clock.Now(), c.DownAfter), kick: make(chan struct{}, 1), bindWake: make(chan struct{}, 1), states: map[int64]*ruleState{}, resync: map[int64]struct{}{}}
+	e.monitoringOK.Store(true)
 	e.rules.Store(newRuleSet(nil))
 	e.disp = newDispatcher(e.q, d.Sender, d.Access, d.Clock, dispatcherConfig{ttlDrain: c.DrainTimeout,
 		backoff: retryBackoff{initial: c.BackoffInitial, max: c.BackoffMax, rand: c.Rand}, rate: c.Rate, burst: c.Burst,
@@ -228,9 +262,14 @@ func (e *Engine) Run(ctx context.Context) {
 
 func (e *Engine) runEvaluator(ctx context.Context) {
 	for {
+		var due <-chan time.Time
+		if at, ok := e.nextDue(); ok {
+			due = e.clock.After(max(at.Sub(e.clock.Now()), 0))
+		}
 		select {
 		case <-e.mb.wake:
 		case <-e.kick:
+		case <-due:
 		case <-ctx.Done():
 			n, _ := e.mb.pending(e.clock.Now())
 			e.atShutdown.Store(int64(n)) // changes still in the mailbox are not evaluated at shutdown
@@ -242,10 +281,16 @@ func (e *Engine) runEvaluator(ctx context.Context) {
 
 func (e *Engine) evaluate(ctx context.Context) {
 	rs := e.rules.Load()
-	if e.reseed.Swap(false) {
-		e.reconcileStates(rs)
-	}
+	// Drain first: a rule that is new or just re-bound is seeded from the state
+	// BEFORE the changes still waiting in the mailbox, so a transition that is
+	// pending right now is not mistaken for a state that already existed.
 	slots, order, overflowed := e.mb.drain()
+	if e.reseed.Swap(false) {
+		e.reconcileStates(rs, slots)
+	}
+	if e.reseedDur.Swap(false) {
+		e.reseedEpisodes(rs)
+	}
 	if overflowed {
 		for id := range rs.byID {
 			e.markResync(id)
@@ -263,110 +308,369 @@ func (e *Engine) evaluate(ctx context.Context) {
 	for _, id := range order {
 		e.evaluateSlot(ctx, rs, id, slots[id])
 	}
+	e.fireDue(ctx, rs)
 	e.maybeDigest(ctx, rs)
 	e.noteBacklog()
+	e.noteEpisodes()
 }
 
-// reconcileStates drops state of rules that disappeared and seeds new ones from
-// the current sensor, silently.
-func (e *Engine) reconcileStates(rs *ruleSet) {
+// reconcileStates drops the state of rules that disappeared and seeds new ones
+// (and ones whose unit was just bound) from the current sensor, silently: enabling
+// a rule never alerts for a state that already existed.
+func (e *Engine) reconcileStates(rs *ruleSet, pending map[entities.ID]slot) {
 	for id := range e.states {
 		if _, ok := rs.byID[id]; !ok {
 			delete(e.states, id)
 		}
 	}
+	now := e.clock.Now()
 	for id, r := range rs.byID {
-		if _, ok := e.states[id]; ok {
+		if st, ok := e.states[id]; ok && st.unit == r.Unit {
 			continue
 		}
-		st := &ruleState{}
-		if s, monitored := e.d.Sensors.Get(r.Entity); monitored && compatible(r.Kind, s.Category) && reliable(s) {
-			st.active, st.baselined = violates(r, s), true
-		}
+		st := &ruleState{armed: true, unit: r.Unit}
 		e.states[id] = st
+		s, monitored := e.d.Sensors.Get(r.Entity)
+		if sl, waiting := pending[r.Entity]; waiting && r.stateful() && len(sl.trail) > 0 {
+			// Changes for this entity are waiting: seed from the state before the first of
+			// them, so evaluating them next sees the same transitions a running rule would.
+			first := sl.trail[0]
+			if sl.trailLost || !first.HadPrev {
+				continue // no known "before": the first reliable reading becomes the baseline
+			}
+			s, monitored = first.Prev, true
+		}
+		if !monitored || !usable(r, s) || !reliableFor(r, s) {
+			continue
+		}
+		st.baselined = true
+		if violates(r, s) {
+			e.baselineViolating(r, st, now)
+		}
+	}
+	e.noteEpisodes()
+}
+
+// baselineViolating handles a rule whose sensor NeptHass first sees already
+// violating: no event happened, so nothing alerts here. A duration rule starts
+// counting from now (never from an earlier time it cannot prove); a rule with a
+// clear value must see the sensor clear before it can fire.
+func (e *Engine) baselineViolating(r cachedRule, st *ruleState, at time.Time) {
+	switch {
+	case r.Duration > 0:
+		e.startEpisode(st, at, r.Duration, false)
+	case r.HasClear:
+		st.armed = false
+	}
+}
+
+func (e *Engine) startEpisode(st *ruleState, at time.Time, d time.Duration, exact bool) {
+	st.ep = &episode{start: at, due: at.Add(d), exact: exact}
+	e.m.episodesStarted.Add(1)
+}
+
+// cancelEpisode drops a pending episode: the condition ended, became unreliable,
+// or its continuity could not be proven.
+func (e *Engine) cancelEpisode(st *ruleState) {
+	if st.ep != nil {
+		st.ep = nil
+		e.m.episodesCancelled.Add(1)
+	}
+}
+
+func (e *Engine) noteEpisodes() {
+	n := 0
+	for _, st := range e.states {
+		if st.ep != nil {
+			n++
+		}
+	}
+	e.pendingEps.Store(int64(n))
+}
+
+// nextDue is the earliest pending duration. While monitoring is unhealthy
+// nothing is due: a duration is never claimed while Home Assistant cannot be watched.
+func (e *Engine) nextDue() (time.Time, bool) {
+	if !e.monitoringOK.Load() {
+		return time.Time{}, false
+	}
+	var first time.Time
+	found := false
+	for _, st := range e.states {
+		if st.ep != nil && (!found || st.ep.due.Before(first)) {
+			first, found = st.ep.due, true
+		}
+	}
+	return first, found
+}
+
+// slotEnv carries what one evaluation of one entity shares between its rules:
+// the sharing read (once), the alias map (once) and the clock reading.
+type slotEnv struct {
+	e         *Engine
+	ctx       context.Context
+	id        entities.ID
+	now       time.Time
+	access    entities.Access
+	haveRead  bool
+	accessErr bool
+	aliases   map[entities.ID]string
+	loaded    bool
+}
+
+func (v *slotEnv) load() {
+	if v.haveRead {
+		return
+	}
+	a, err := v.e.d.Access.Get(v.ctx, v.id)
+	v.access, v.accessErr, v.haveRead = a, err != nil, true
+}
+
+// permitted reports whether sharing allows an alert for the entity right now. A
+// sharing read that fails is not "unshared": the rule is flagged for a digest of
+// the current state instead.
+func (v *slotEnv) permitted(rule int64) bool {
+	v.load()
+	if v.accessErr {
+		v.e.markResync(rule)
+		return false
+	}
+	if !v.access.AtLeast(entities.AccessRead) {
+		v.e.m.suppressedUnshared.Add(1)
+		return false
+	}
+	return true
+}
+
+func (v *slotEnv) names() map[entities.ID]string {
+	if !v.loaded && v.e.d.Aliases != nil {
+		v.aliases, _ = v.e.d.Aliases.All(v.ctx)
+	}
+	v.loaded = true
+	return v.aliases
+}
+
+// release applies the cooldown and, when it allows, enqueues the alert. A
+// violation suppressed by the cooldown is counted and consumed, never deferred.
+func (e *Engine) release(v *slotEnv, r cachedRule, st *ruleState, cat monitor.Category, build func(muted int) Message) {
+	if cd := cooldownOf(r, cat); cd > 0 && st.hasFired && v.now.Sub(st.lastFired) < cd {
+		st.muted++
+		e.m.suppressedCooldown.Add(1)
+		return
+	}
+	msg := build(st.muted)
+	st.muted, st.hasFired, st.lastFired = 0, true, v.now
+	e.enqueue(msg)
+}
+
+// maybeRequestBind asks the watcher to bind a legacy numeric rule when its sensor
+// reports a real value in the one documented unit of its class. Ambiguous classes
+// are never requested: they wait for an administrator.
+func (e *Engine) maybeRequestBind(r cachedRule, s monitor.Sensor) {
+	if e.d.Binder == nil || r.Kind == KindState || r.Unit != "" || !reliable(s) {
+		return
+	}
+	spec, ok := monitor.SpecFor(s.Category)
+	if !ok {
+		return
+	}
+	if unit, single := spec.SingleUnit(); !single || s.Unit != unit {
+		return
+	}
+	select {
+	case e.bindWake <- struct{}{}:
+	default:
 	}
 }
 
 // evaluateSlot applies one entity's coalesced changes to its rules.
 //
-// A rule alerts only for a latched qualifying transition (see enters): a first
-// observation, a state that merely persists, and an unreliable-to-violating
-// transition (other than a leak reaching wet) re-arm or baseline silently. After
-// every pass the rule is "active" while the sensor reliably violates it and
-// re-arms when the sensor reliably stops violating it; an unavailable or unknown
-// reading changes neither. The qualifying transition is consumed whether or not
+// A plain immediate rule alerts only for a latched qualifying transition (see
+// enters): a first observation, a state that merely persists, and an
+// unreliable-to-violating transition (other than a hazard reaching its alert
+// state) baseline silently. The qualifying transition is consumed whether or not
 // an alert goes out: if cooldown or sharing suppresses it, no alert is deferred
-// and none is produced later for that same episode.
+// and none is produced later for that same episode. A rule that cannot evaluate
+// this sensor (the kind does not fit, or the unit is not the one the threshold is
+// bound to) is dormant: it never fires and never re-arms.
+//
+// A stateful rule (a duration or a clear value) replays the ordered trail instead.
 func (e *Engine) evaluateSlot(ctx context.Context, rs *ruleSet, id entities.ID, s slot) {
-	rules := rs.byEntity[id]
-	now := e.clock.Now()
-	var (
-		access     entities.Access
-		haveAccess bool
-		accessErr  bool
-		aliases    map[entities.ID]string
-		loaded     bool
-	)
-	for _, r := range rules {
+	v := &slotEnv{e: e, ctx: ctx, id: id, now: e.clock.Now()}
+	for _, r := range rs.byEntity[id] {
 		st := e.states[r.ID]
 		if st == nil {
-			st = &ruleState{}
+			st = &ruleState{armed: true, unit: r.Unit}
 			e.states[r.ID] = st
 		}
 		if s.removed {
-			st.baselined, st.active = false, false
+			st.baselined, st.armed = false, true
+			e.cancelEpisode(st)
 			continue
 		}
 		if !s.haveCur {
 			continue
 		}
 		cur := s.cur
-		if !compatible(r.Kind, cur.Category) {
+		e.maybeRequestBind(r, cur)
+		if !usable(r, cur) {
 			st.baselined = false
+			e.cancelEpisode(st)
 			continue
 		}
 		if s.reset {
 			st.baselined = false
 		}
-		violating, ok := violates(r, cur), reliable(cur)
+		if r.stateful() {
+			e.replay(v, r, st, s)
+			continue
+		}
+		if reliableFor(r, cur) {
+			st.baselined = true
+		}
 		l, latched := s.latchFor(r.ID)
-		if latched {
-			st.active = true
-		}
-		if ok {
-			st.active, st.baselined = violating, true
-		}
-		if !latched {
+		if !latched || !v.permitted(r.ID) {
 			continue
 		}
-		if !haveAccess {
-			var err error
-			if access, err = e.d.Access.Get(ctx, id); err != nil {
-				accessErr = true
-			}
-			haveAccess = true
-		}
-		if accessErr {
-			e.markResync(r.ID) // sharing could not be read: re-check the current state later
-			continue
-		}
-		if !access.AtLeast(entities.AccessRead) {
-			e.m.suppressedUnshared.Add(1)
-			continue
-		}
-		if cd := cooldownOf(r, cur.Category); cd > 0 && st.hasFired && now.Sub(st.lastFired) < cd {
-			st.muted++
-			e.m.suppressedCooldown.Add(1)
-			continue
-		}
-		if !loaded && e.d.Aliases != nil {
-			aliases, _ = e.d.Aliases.All(ctx)
-		}
-		loaded = true
-		msg := e.alertMessage(r, id, cur, l, violating, st.muted, aliases)
-		st.muted, st.hasFired, st.lastFired = 0, true, now
-		e.enqueue(msg)
+		e.release(v, r, st, cur.Category, func(muted int) Message {
+			return e.alertMessage(r, id, cur, l, violates(r, cur), muted, v.names())
+		})
 	}
+}
+
+// replay walks the ordered trail of one entity for one stateful rule.
+func (e *Engine) replay(v *slotEnv, r cachedRule, st *ruleState, s slot) {
+	if s.trailLost {
+		// Some changes were dropped: continuity is unknown, so a pending episode is
+		// cancelled and the next reliable reading is a new first sighting.
+		e.cancelEpisode(st)
+		st.baselined = false
+	}
+	for _, c := range s.trail {
+		e.observe(v, r, st, c)
+	}
+}
+
+// observe applies one observation to a stateful rule.
+func (e *Engine) observe(v *slotEnv, r cachedRule, st *ruleState, c monitor.Change) {
+	cur := c.Cur
+	ok := reliableFor(r, cur)
+	violating := ok && violates(r, cur)
+	first := ok && !st.baselined
+	if ok {
+		st.baselined = true
+	}
+	switch {
+	case !ok:
+		e.cancelEpisode(st) // continuity is unknown: nothing is guessed
+	case !violating:
+		e.cancelEpisode(st)
+		if !r.HasClear || cleared(r, cur) {
+			st.armed = true
+		}
+	case first:
+		e.baselineViolating(r, st, c.At)
+	case r.Duration > 0:
+		if st.ep == nil && st.armed {
+			q, _ := enters(r, c)
+			e.startEpisode(st, c.At, r.Duration, q && c.Source != monitor.SourceSnapshot)
+		}
+	default: // an immediate rule with a clear value
+		if q, fromUnreliable := enters(r, c); q && (st.armed || fromUnreliable) {
+			st.armed = false
+			l := latch{rule: r.ID, seq: c.Seq, source: c.Source, at: c.At, sensor: cur, fromUnreliable: fromUnreliable}
+			if v.permitted(r.ID) {
+				e.release(v, r, st, cur.Category, func(muted int) Message {
+					return e.alertMessage(r, v.id, cur, l, true, muted, v.names())
+				})
+			}
+		}
+	}
+}
+
+// fireDue fires the pending durations that have come due. It trusts nothing it
+// remembers: the current sensor is re-read, and the alert goes out only if the
+// sensor is still reliably violating the rule and sharing still allows it. While
+// monitoring is unhealthy nothing fires.
+func (e *Engine) fireDue(ctx context.Context, rs *ruleSet) {
+	if !e.monitoringOK.Load() {
+		return
+	}
+	now := e.clock.Now()
+	var due []int64
+	for id, st := range e.states {
+		if st.ep != nil && !now.Before(st.ep.due) {
+			due = append(due, id)
+		}
+	}
+	if len(due) == 0 {
+		return
+	}
+	slices.SortFunc(due, func(a, b int64) int {
+		if c := e.states[a].ep.due.Compare(e.states[b].ep.due); c != 0 {
+			return c
+		}
+		return cmp.Compare(a, b)
+	})
+	for _, id := range due {
+		st := e.states[id]
+		r, ok := rs.byID[id]
+		if !ok {
+			e.cancelEpisode(st)
+			continue
+		}
+		s, monitored := e.d.Sensors.Get(r.Entity)
+		if !monitored || !usable(r, s) || !reliableFor(r, s) || !violates(r, s) {
+			e.cancelEpisode(st)
+			continue
+		}
+		v := &slotEnv{e: e, ctx: ctx, id: r.Entity, now: now}
+		v.load()
+		if v.accessErr {
+			st.ep.due = now.Add(e.cfg.HealthTick) // sharing could not be read: try again, nothing is lost
+			continue
+		}
+		ep := *st.ep
+		st.ep, st.armed = nil, false
+		e.m.episodesFired.Add(1)
+		if !v.permitted(r.ID) {
+			continue
+		}
+		e.release(v, r, st, s.Category, func(muted int) Message {
+			return e.durationMessage(r, r.Entity, s, ep, now, muted, v.names())
+		})
+	}
+}
+
+// reseedEpisodes restarts every pending duration from the current sensors after
+// monitoring was unhealthy: continuity during an outage cannot be proven, so the
+// clock starts again from now. A duration can be late after an outage, never early.
+func (e *Engine) reseedEpisodes(rs *ruleSet) {
+	now := e.clock.Now()
+	for id, r := range rs.byID {
+		st := e.states[id]
+		if st == nil || r.Duration <= 0 {
+			continue
+		}
+		st.ep = nil
+		s, monitored := e.d.Sensors.Get(r.Entity)
+		if monitored && usable(r, s) && reliableFor(r, s) && violates(r, s) && st.armed {
+			e.startEpisode(st, now, r.Duration, false)
+		}
+	}
+	e.noteEpisodes()
+}
+
+func (e *Engine) durationMessage(r cachedRule, id entities.ID, s monitor.Sensor, ep episode, now time.Time, muted int, aliases map[entities.ID]string) Message {
+	in := s.Interpretation()
+	m := Message{Kind: MsgAlert, RuleID: r.ID, Category: s.Category, Name: displayName(id, s, aliases), Trigger: r.Kind,
+		Meaning: in.Meaning, Value: in.Value, HasValue: in.HasValue, Unit: s.Unit, ObservedAt: now, ChangedAt: s.LastChanged,
+		Muted: muted, Duration: r.Duration, HeldAtLeast: !ep.exact, entity: id}
+	if r.Kind != KindState {
+		t := r.Threshold
+		m.Threshold = &t
+	}
+	return m
 }
 
 func (e *Engine) alertMessage(r cachedRule, id entities.ID, cur monitor.Sensor, l latch, violating bool, muted int, aliases map[entities.ID]string) Message {
@@ -461,7 +765,7 @@ func (e *Engine) maybeDigest(ctx context.Context, rs *ruleSet) {
 			st = &ruleState{}
 			e.states[id] = st
 		}
-		st.active, st.baselined, st.hasFired, st.lastFired = true, true, true, now
+		st.baselined, st.hasFired, st.lastFired = true, true, now
 	}
 	if len(lines) == 0 {
 		return
@@ -495,6 +799,8 @@ func (e *Engine) runWatcher(ctx context.Context) {
 		}
 		select {
 		case <-timer:
+		case <-e.bindWake:
+			e.bindLegacy(ctx)
 		case <-ctx.Done():
 			e.down.shutdown() // shutting down is not an outage
 			return
@@ -508,6 +814,10 @@ func (e *Engine) runWatcher(ctx context.Context) {
 func (e *Engine) sampleHealth() (stop bool) {
 	st := e.d.Status.Status()
 	now := e.clock.Now()
+	if healthy := st.Healthy; healthy != e.monitoringOK.Swap(healthy) && healthy {
+		e.reseedDur.Store(true) // monitoring is back: pending durations restart from the current sensors
+		e.kickEvaluator()
+	}
 	switch {
 	case st.State == monitor.StateStopped:
 		e.down.shutdown() // the monitor was stopped on purpose: never an outage
@@ -531,6 +841,19 @@ func (e *Engine) handleDown(act downAction, st monitor.Status, now time.Time) {
 		for _, it := range e.q.removeWhere(func(it item) bool { return it.msg.Kind == MsgMonitoringDown && it.msg.Episode == ep }) {
 			e.disp.report(drop{it: it, reason: dropCancelled})
 		}
+	}
+}
+
+// bindLegacy runs the one-time unit binding and reloads the rules when it bound any.
+func (e *Engine) bindLegacy(ctx context.Context) {
+	n, err := e.d.Binder.BindLegacyUnits(ctx)
+	if err != nil {
+		e.log.Error("binding the unit of legacy notification rules failed", "error", err)
+		return
+	}
+	if n > 0 {
+		e.log.Info("notification rules bound to their sensor's unit", "rules", n)
+		_ = e.Reload(ctx)
 	}
 }
 
@@ -600,8 +923,12 @@ type Health struct {
 	DroppedOverflow, DroppedTTL, DroppedPermanent, DroppedBreaker      uint64
 	DroppedRevoked, DroppedDisabled, DroppedShutdown, DroppedCancelled uint64
 	SuppressedCooldown, SuppressedUnshared                             uint64
-	Digests, Abandoned                                                 uint64
-	PendingAtShutdown                                                  int64
+	// PendingEpisodes is how many duration rules are counting; the others count
+	// episodes since start that began, fired, or ended without firing.
+	PendingEpisodes                                   int
+	EpisodesStarted, EpisodesFired, EpisodesCancelled uint64
+	Digests, Abandoned                                uint64
+	PendingAtShutdown                                 int64
 	// ConfigStale is true while the saved configuration is NOT the running one
 	// (a reload failed). The engine keeps the previous configuration and retries.
 	ConfigStale bool
@@ -626,6 +953,8 @@ func (e *Engine) Health() Health {
 		DroppedShutdown: e.m.droppedShutdown.Load(), DroppedCancelled: e.m.droppedCancelled.Load(),
 		SuppressedCooldown: e.m.suppressedCooldown.Load(), SuppressedUnshared: e.m.suppressedUnshared.Load(),
 		Digests: e.m.digests.Load(), Abandoned: e.m.abandoned.Load(), PendingAtShutdown: e.atShutdown.Load()}
+	h.PendingEpisodes = int(e.pendingEps.Load())
+	h.EpisodesStarted, h.EpisodesFired, h.EpisodesCancelled = e.m.episodesStarted.Load(), e.m.episodesFired.Load(), e.m.episodesCancelled.Load()
 	h.ConfigStale = e.reloadFailed.Load()
 	if h.ConfigStale {
 		h.Reasons = append(h.Reasons, "saved configuration is not active (reload failed; retrying)")

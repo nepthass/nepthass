@@ -535,7 +535,7 @@ func statusOf(r Rule, access entities.Access, sensor monitor.Sensor, monitored b
 		return StatusNeedsSharing
 	case !monitored:
 		return StatusNotMonitored
-	case !compatible(r.Kind, sensor.Category):
+	case !supports(r.Kind, r.Duration, r.Clear != nil, sensor.Category):
 		return StatusIncompatible
 	case r.Kind != KindState && r.Unit == "":
 		return StatusUnitUnresolved
