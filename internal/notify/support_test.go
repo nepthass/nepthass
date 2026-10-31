@@ -186,7 +186,7 @@ func (a *flakyAccess) setFail(v bool) {
 }
 
 func sens(cat monitor.Category, raw string) monitor.Sensor {
-	return monitor.Sensor{ID: "x.sensor", Category: cat, Name: "Name", Raw: raw, Unit: "u", LastChanged: time.Unix(1_000_000, 0).UTC()}
+	return monitor.Sensor{ID: "x.sensor", Category: cat, Name: "Name", Raw: raw, Unit: unitFor(cat), LastChanged: time.Unix(1_000_000, 0).UTC()}
 }
 
 func chg(id string, cat monitor.Category, hadPrev bool, prev, cur string, src monitor.ChangeSource, seq uint64) monitor.Change {

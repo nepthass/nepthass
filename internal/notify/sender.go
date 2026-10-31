@@ -175,12 +175,14 @@ func (b *breaker) isOpen() bool {
 // counters are the engine's monotonic totals. Every message that does not reach
 // the transport is counted under exactly one reason.
 type counters struct {
-	enqueued, delivered, retried                                                  atomic.Uint64
-	droppedOverflow, droppedTTL, droppedRevoked, droppedPermanent, droppedBreaker atomic.Uint64
-	droppedDisabled, droppedShutdown, droppedCancelled                            atomic.Uint64
-	suppressedCooldown, suppressedUnshared                                        atomic.Uint64
-	abandoned, digests                                                            atomic.Uint64
-	lastDropNanos                                                                 atomic.Int64
+	enqueued, delivered, retried                                                      atomic.Uint64
+	droppedOverflow, droppedTTL, droppedRevoked, droppedPermanent, droppedBreaker     atomic.Uint64
+	droppedDisabled, droppedShutdown, droppedCancelled                                atomic.Uint64
+	suppressedCooldown, suppressedUnshared                                            atomic.Uint64
+	abandoned, digests                                                                atomic.Uint64
+	episodesStarted, episodesFired, episodesCancelled                                 atomic.Uint64
+	initialAlerts, markSuppressed, startupListed, startupSummaries, summarySuppressed atomic.Uint64
+	lastDropNanos                                                                     atomic.Int64
 }
 
 func (c *counters) countDrop(r dropReason, at time.Time) {

@@ -19,6 +19,9 @@ import (
 )
 
 type fakeNotifications struct {
+	added  []notify.NewRule // every NewRule the command passed to AddRule
+	item   *RuleItem        // overrides the item AddRule returns
+	unit   string           // what ConfirmUnit reports
 	calls  []string
 	err    error
 	rules  []RuleItem
@@ -47,7 +50,13 @@ func (f *fakeNotifications) AddRule(_ context.Context, _ auth.Actor, n notify.Ne
 	if n.Cooldown != nil {
 		cd = n.Cooldown.String()
 	}
+	f.added = append(f.added, n)
 	f.rec("add %s %s %s %s", n.Entity, n.Kind, th, cd)
+	if f.item != nil && f.err == nil {
+		it := *f.item
+		it.Entity, it.Kind, it.Threshold, it.Duration, it.Clear = n.Entity, n.Kind, n.Threshold, n.Duration, n.Clear
+		return it, nil
+	}
 	return RuleItem{RuleView: notify.RuleView{Rule: notify.Rule{ID: 7, Entity: n.Entity, Kind: n.Kind, Threshold: n.Threshold, Cooldown: n.Cooldown}, Category: monitor.CategoryDoor}, Name: "Front door"}, f.err
 }
 func (f *fakeNotifications) Rules(context.Context, auth.Actor) ([]RuleItem, error) {
@@ -67,6 +76,16 @@ func (f *fakeNotifications) SendTest(context.Context, auth.Actor) error {
 }
 func (f *fakeNotifications) Status(context.Context, auth.Actor) (NotificationStatus, error) {
 	return f.status, f.err
+}
+func (f *fakeNotifications) ConfirmUnit(_ context.Context, _ auth.Actor, id int64) (string, error) {
+	f.rec("unit %d", id)
+	if f.err != nil {
+		return "", f.err
+	}
+	if f.unit == "" {
+		return "°F", nil
+	}
+	return f.unit, nil
 }
 func (f *fakeNotifications) HealthLine() string { return f.line }
 
@@ -131,7 +150,7 @@ func TestNotificationsCommand_isRegisteredOnlyWhenConfigured_withTheRightDefinit
 	for _, o := range def.Options {
 		subs = append(subs, o.Name)
 	}
-	if got := strings.Join(subs, ","); got != "channel,add,list,pause,resume,remove,test,status" {
+	if got := strings.Join(subs, ","); got != "channel,add,list,pause,resume,remove,unit,test,status" {
 		t.Errorf("subcommands = %s", got)
 	}
 	ch := def.Options[0].Options[0]
@@ -139,11 +158,24 @@ func TestNotificationsCommand_isRegisteredOnlyWhenConfigured_withTheRightDefinit
 		t.Errorf("the channel option is restricted to text channels: %+v", ch)
 	}
 	add := def.Options[1].Options
-	if add[0].Name != "entity" || !add[0].Autocomplete || add[1].Type != discordgo.ApplicationCommandOptionNumber || add[2].Type != discordgo.ApplicationCommandOptionNumber ||
-		add[1].MaxValue != notify.MaxThreshold || add[3].Type != discordgo.ApplicationCommandOptionInteger || add[3].MaxValue != 1440 {
-		t.Errorf("add options: %+v", add)
+	addNames := ""
+	for _, o := range add {
+		addNames += o.Name + ","
 	}
-	for _, i := range []int{3, 4, 5} {
+	if addNames != "entity,above,below,clear,for,cooldown," {
+		t.Fatalf("add options: %s", addNames)
+	}
+	if !add[0].Autocomplete || add[1].Type != discordgo.ApplicationCommandOptionNumber || add[2].Type != discordgo.ApplicationCommandOptionNumber || add[3].Type != discordgo.ApplicationCommandOptionNumber ||
+		add[1].MaxValue != notify.MaxThreshold || add[3].MaxValue != notify.MaxThreshold {
+		t.Errorf("add number options: %+v", add)
+	}
+	if add[4].Type != discordgo.ApplicationCommandOptionInteger || add[4].MinValue == nil || *add[4].MinValue != 1 || add[4].MaxValue != 1440 {
+		t.Errorf("for is whole minutes from 1 to 1440: %+v", add[4])
+	}
+	if add[5].Type != discordgo.ApplicationCommandOptionInteger || add[5].MaxValue != 1440 {
+		t.Errorf("cooldown: %+v", add[5])
+	}
+	for _, i := range []int{3, 4, 5, 6} {
 		if o := def.Options[i].Options[0]; o.Name != "rule" || !o.Autocomplete {
 			t.Errorf("subcommand %s needs an autocompleted rule option: %+v", def.Options[i].Name, o)
 		}

@@ -1,0 +1,30 @@
+name: Feature request
+description: Propose an improvement
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please read the [roadmap](../blob/main/docs/roadmap.md) first: proposals that fit the current milestone are easier to accept.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem you want solved
+      description: Describe the situation, not only the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Your proposal
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+  - type: textarea
+    id: security
+    attributes:
+      label: Security impact
+      description: Does it change who can see or control what, add a control domain, store new data, or send data to a new place?
+    validations:
+      required: true

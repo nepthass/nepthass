@@ -27,6 +27,14 @@ input_boolean:
     name: Simulate window open
     icon: mdi:window-open
     initial: false
+  nepthass_dev_sim_garage_door_open:
+    name: Simulate garage door open
+    icon: mdi:garage-open
+    initial: false
+  nepthass_dev_sim_opening_open:
+    name: Simulate opening open
+    icon: mdi:door-open
+    initial: false
   nepthass_dev_sim_leak:
     name: Simulate water leak
     icon: mdi:water-alert
@@ -43,6 +51,14 @@ input_boolean:
     initial: false
   nepthass_dev_offline_window:
     name: Window sensor offline
+    icon: mdi:wifi-off
+    initial: false
+  nepthass_dev_offline_garage_door:
+    name: Garage door sensor offline
+    icon: mdi:wifi-off
+    initial: false
+  nepthass_dev_offline_opening:
+    name: Opening sensor offline
     icon: mdi:wifi-off
     initial: false
   nepthass_dev_offline_temperature:

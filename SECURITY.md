@@ -52,6 +52,6 @@ Out of scope:
 - Everything is read-only by default. An administrator must share each entity explicitly, at `read` or `control` level.
 - Only `light` and `switch` entities can be turned on or off. Locks, garage doors, alarm panels and all other domains are never controlled.
 - Secrets are configured locally (environment or secret files), never through Discord, and are redacted from logs.
-- Discord notifications, when introduced, are best-effort and are not a guaranteed emergency channel.
+- Notification settings are administrator-only and sharing is re-checked before every alert. Alerts are best-effort and are not a guaranteed emergency channel, and everyone who can read the alert channel sees them.
 
 Hardening guidance: [docs/security.md](docs/security.md).

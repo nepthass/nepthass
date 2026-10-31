@@ -257,7 +257,7 @@ func (d *dispatcher) recheck(ctx context.Context, it item) (item, verdict) {
 		if !access.AtLeast(entities.AccessRead) {
 			return it, verdictRevoked
 		}
-	case MsgDigest:
+	case MsgDigest, MsgStartup:
 		kept := make([]DigestLine, 0, len(it.msg.Lines))
 		for _, l := range it.msg.Lines {
 			access, err := d.access.Get(ctx, l.entity)

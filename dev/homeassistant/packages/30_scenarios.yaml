@@ -23,10 +23,14 @@ script:
             - input_boolean.nepthass_dev_sim_motion
             - input_boolean.nepthass_dev_sim_door_open
             - input_boolean.nepthass_dev_sim_window_open
+            - input_boolean.nepthass_dev_sim_garage_door_open
+            - input_boolean.nepthass_dev_sim_opening_open
             - input_boolean.nepthass_dev_sim_leak
             - input_boolean.nepthass_dev_offline_motion
             - input_boolean.nepthass_dev_offline_door
             - input_boolean.nepthass_dev_offline_window
+            - input_boolean.nepthass_dev_offline_garage_door
+            - input_boolean.nepthass_dev_offline_opening
             - input_boolean.nepthass_dev_offline_temperature
             - input_boolean.nepthass_dev_offline_humidity
             - input_boolean.nepthass_dev_offline_leak
@@ -84,6 +88,26 @@ script:
       - action: input_boolean.turn_on
         target:
           entity_id: input_boolean.nepthass_dev_sim_window_open
+
+  nepthass_dev_scenario_garage_door_opened:
+    alias: "NeptHass Dev: garage door opened"
+    icon: mdi:garage-open
+    description: "Garage door sensor reports open."
+    mode: single
+    sequence:
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.nepthass_dev_sim_garage_door_open
+
+  nepthass_dev_scenario_opening_opened:
+    alias: "NeptHass Dev: opening opened"
+    icon: mdi:door-open
+    description: "Opening sensor reports open."
+    mode: single
+    sequence:
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.nepthass_dev_sim_opening_open
 
   nepthass_dev_scenario_high_temperature:
     alias: "NeptHass Dev: high temperature (31.2 C)"

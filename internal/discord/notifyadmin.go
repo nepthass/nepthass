@@ -86,8 +86,22 @@ func (a *NotificationAdmin) AddRule(ctx context.Context, actor auth.Actor, n not
 	item := commands.RuleItem{RuleView: notify.RuleView{Rule: r, Status: notify.StatusActive}, Name: a.nameOf(r.Entity, names)}
 	if s, ok := a.sensors.Get(r.Entity); ok {
 		item.Category = s.Category
+		item.AlreadyActive = r.ViolatedBy(s)
 	}
 	return item, nil
+}
+
+// ConfirmUnit binds a rule that predates unit tracking to its sensor's current unit and
+// reloads the engine so the rule starts evaluating.
+func (a *NotificationAdmin) ConfirmUnit(ctx context.Context, actor auth.Actor, id int64) (string, error) {
+	unit, err := a.svc.ConfirmUnit(ctx, actor, id)
+	if err != nil {
+		return "", err
+	}
+	if err := a.reload(ctx); err != nil {
+		return "", err
+	}
+	return unit, nil
 }
 
 func (a *NotificationAdmin) Rules(ctx context.Context, actor auth.Actor) ([]commands.RuleItem, error) {

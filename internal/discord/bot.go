@@ -14,6 +14,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 
+	"github.com/nepthass/nepthass/internal/audit"
 	"github.com/nepthass/nepthass/internal/auth"
 	"github.com/nepthass/nepthass/internal/config"
 	"github.com/nepthass/nepthass/internal/discord/commands"
@@ -40,6 +41,7 @@ type Bot struct {
 	componentLimiter *auth.Limiter
 	wizard           Wizard
 	reg              *commands.Registry
+	denials          *audit.Denials
 	session          *discordgo.Session
 	ready            atomic.Bool
 	retry            backoff
@@ -75,6 +77,7 @@ func New(cfg config.Discord, deps commands.Deps, setupService *setup.Service) (*
 		deps.Setup = b.wizard
 	}
 	b.reg = commands.New(deps)
+	b.denials = deps.Denials
 	return b, nil
 }
 

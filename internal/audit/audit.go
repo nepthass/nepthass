@@ -119,6 +119,12 @@ func (l *Log) RunRetention(ctx context.Context, retention time.Duration, logger 
 	defer ticker.Stop()
 	for {
 		n, err := l.Prune(ctx, time.Now().Add(-retention))
+		if err == nil {
+			var extra int64
+			if extra, err = l.PruneDenied(ctx, MaxDeniedRows); err == nil {
+				n += extra
+			}
+		}
 		switch {
 		case ctx.Err() != nil:
 			return

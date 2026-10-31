@@ -1,38 +1,126 @@
 # Architecture
 
-NeptHass is a modular monolith: one Go binary, one SQLite file, no public API.
+NeptHass is a modular monolith: one Go binary, one SQLite file, no public API. It only makes outbound connections (Discord, Home Assistant) and listens on no port.
+
+This document describes the system as of **v0.4.0**. The per-milestone design records are in [design/](design/): [interactive setup](design/interactive-setup.md), [sensor monitoring](design/sensor-monitoring.md) and [notifications](design/notifications.md).
+
+## System overview
+
+```mermaid
+flowchart LR
+  subgraph ext["Outside the process"]
+    DCG["Discord gateway<br/>(interactions in)"]
+    DCR["Discord REST<br/>(alerts out)"]
+    HAR["Home Assistant REST"]
+    HAW["Home Assistant WebSocket<br/>(state_changed events)"]
+  end
+
+  subgraph proc["NeptHass process"]
+    BOT["discord.Bot<br/>authorize, rate limit, route"]
+    REG["commands.Registry<br/>level check, options"]
+    WIZ["wizard + setup<br/>/setup state machine"]
+    ENT["entities<br/>Service, Permissions,<br/>Aliases, Discovery"]
+    RD["monitor.Reader<br/>per-read permission check"]
+    MON["monitor.Monitor<br/>ws session, Tracker"]
+    ENG["notify.Engine<br/>mailbox, evaluator, lanes,<br/>dispatcher, watcher"]
+    NTF["discord.Notifier<br/>REST sender, channel validation"]
+    ADM["discord.NotificationAdmin<br/>validate, save, reload"]
+    AUD["audit"]
+    DB[("SQLite<br/>WAL, migrations")]
+  end
+
+  DCG --> BOT --> REG
+  REG --> ENT --> HAR
+  REG --> WIZ --> ENT
+  REG --> RD --> MON
+  REG --> ADM --> ENG
+  ADM --> DB
+  ENT --> DB
+  WIZ --> DB
+  ENT --> AUD --> DB
+  HAW --> MON
+  MON -- "OnChange (never blocks)" --> ENG
+  ENG -- "Sender.Send" --> NTF --> DCR
+  ENG -. "reads sharing before every send" .-> ENT
+  ENG --> DB
+```
+
+## Package map
 
 ```text
-cmd/nepthass            wiring only (config, logger, dependencies, signals)
-internal/config         environment parsing and validation, Secret type
-internal/logging        slog logger with secret scrubbing
-internal/storage        SQLite open + migration runner      <- migrations/ (embedded SQL)
-internal/auth           guild/user allowlists, rate limiter
-internal/audit          audit log table + retention (usable inside a transaction)
-internal/entities       entity model, permissions, aliases, discovery cache, sync registry, the shared grant rule, Service
-internal/setup          setup sessions: state machine, store, plan, atomic apply (Discord-free)
+cmd/nepthass                  wiring only: config, logger, dependencies, signals, shutdown order
+internal/config               environment parsing and validation, Secret type
+internal/logging              slog logger with secret scrubbing
+internal/storage              SQLite open + migration runner      <- migrations/ (embedded SQL)
+internal/auth                 guild/user allowlists, levels, rate limiter
+internal/audit                audit log table + retention (usable inside a transaction)
+internal/entities             entity model, permissions, aliases, discovery cache, sync registry, Service
+internal/setup                setup sessions: state machine, store, plan, atomic apply (Discord-free)
 internal/homeassistant/rest   Home Assistant REST client (service allowlist)
-internal/homeassistant/ws     Home Assistant WebSocket session: handshake, id correlation, reader, ping (one connection)
-internal/monitor        live sensor monitoring: state machine, backoff, snapshot reconciliation, tracker, authorization Reader
-internal/discord        gateway session, interaction routing, component and modal handling, retry/backoff
+internal/homeassistant/ws     Home Assistant WebSocket session: handshake, id correlation, reader, ping
+internal/monitor              live monitoring: state machine, backoff, reconciliation, Tracker, change feed, Reader, and the typed
+                              sensor capability registry (registry.go): the one table of supported classes
+internal/notify               notification rules, engine (mailbox, evaluator, queues, dispatcher, breaker,
+                              monitoring-down state machine); transport-neutral, no Discord imports
+internal/discord              gateway session, interaction routing, Notifier (Discord REST sender), channel
+                              validation, NotificationAdmin
 internal/discord/commands     slash command definitions and replies
 internal/discord/wizard       the /setup wizard: panels, custom IDs, click handling
 internal/discord/ui           shared embed helpers: branding, escaping, limits
-tests/fakeha            in-memory Home Assistant (REST and a scriptable WebSocket endpoint) used by unit tests
-tests/integration       tests against a real Home Assistant (build tag "integration")
+tests/fakeha                  in-memory Home Assistant (REST and a scriptable WebSocket) for unit tests
+tests/integration             tests against a real Home Assistant (build tag "integration")
 ```
 
-Dependency direction: `discord -> {commands, wizard} -> {setup, entities} -> {auth, audit}`; `rest -> entities` (types only); `entities` and `setup` depend on small interfaces (`HomeAssistant`, `StateSource`, `Recorder`) that `rest` and `audit` satisfy. Discord-specific code lives only in `internal/discord/...`; the rules about who may do what live in `entities` and `setup` and know nothing about Discord. The wizard holds no business rules: every transition, validation and write happens in `internal/setup`.
+Dependency direction: `discord -> {commands, wizard} -> {setup, entities, notify, monitor} -> {auth, audit}`. `notify` depends on `monitor` (types and the change feed), `entities` (permissions) and `auth`, never on Discord. `monitor` knows nothing about Discord or notifications. The rules about who may do what live in `entities` and `setup` and know nothing about Discord. The wizard holds no business rules.
+
+### Interfaces that matter
+
+| Interface | Defined in | Satisfied by | Why it exists |
+| --- | --- | --- | --- |
+| `notify.Sender` | `internal/notify` | `discord.Notifier` | keeps the engine transport-neutral and testable with fakes |
+| `notify.AccessSource` | `internal/notify` | `entities.Permissions` | sharing is re-read before every send |
+| `notify.SensorLookup`, `notify.StatusSource` | `internal/notify` | `monitor.Tracker`, `monitor.Monitor` | evaluation and health without importing the monitor's internals |
+| `notify.Clock` | `internal/notify` | real clock, fake clocks in tests | deterministic tests of timers, TTL, cooldown and the five-minute outage |
+| `monitor.Config.OnChange` | `internal/monitor` | `notify.Engine.OnChange` (via a late-bound hook in `main`) | ordered change feed; must never block |
+| `commands.Notifications`, `commands.Monitoring` | `internal/discord/commands` | `discord.NotificationAdmin`, `monitor.Reader` | commands stay free of storage and engine details |
+| `entities.HomeAssistant`, `StateSource`, `Recorder` | `internal/entities` | `rest.Client`, `audit.Log` | small interfaces defined where they are used |
+
+## Startup and shutdown
+
+`serve()` in `cmd/nepthass/main.go`:
+
+1. Opens SQLite and applies migrations (`storage.Open`). A database written by a newer build, or a migration whose checksum changed, stops startup.
+2. Verifies Home Assistant over REST. An unreachable Home Assistant is a warning (NeptHass keeps running); a rejected token stops the process.
+3. Builds the services (`entities`, discovery, `setup`), then the monitor with a late-bound `OnChange` hook, then the notification store, service, Notifier and Engine, then the Discord bot.
+4. Binds the Notifier to the bot's session (REST only), runs `engine.Reload` once (notifications stay disabled if no settings exist), and starts three background goroutines: audit retention, the monitor, and the engine (which owns three more).
+5. Runs the bot (the gateway) in the foreground.
+
+On SIGTERM or SIGINT the root context is cancelled: the bot closes its session, the monitor closes its WebSocket, and the engine stops its evaluator and watcher and **drains the queue for at most three seconds** over REST (which does not need the gateway). `background.Wait()` joins all of them before the database is released. An intentional shutdown never produces a monitoring-down alert.
+
+## Concurrency model
+
+| Goroutine(s) | Owner | Shared state it touches |
+| --- | --- | --- |
+| Discord gateway and one goroutine per interaction | discordgo + `Bot.serve` (panic-safe) | rate limiter (mutex), SQLite pool |
+| Monitor supervisor, WebSocket reader, pinger | `monitor.Monitor`, `ws.Session` | `Tracker` (mutex), change feed callback |
+| Engine evaluator | `notify.Engine` | rule states and pending duration episodes (owned by this goroutine; one timer, no goroutine per episode), mailbox (mutex), queue (mutex) |
+| Engine dispatcher (and one short-lived goroutine per send) | `notify.Engine` | queue, breaker (mutex), token bucket (mutex), counters (atomics) |
+| Engine health watcher | `notify.Engine` | monitoring-down state machine (mutex), reload retry |
+| Audit retention | `audit.Log` | SQLite |
+
+- The rule set is swapped atomically (`atomic.Pointer`), so the monitor's callback does one atomic load and a map lookup. `Reload` is serialized by a mutex.
+- SQLite uses WAL, immediate transactions, a 5 second busy timeout and at most 4 connections.
+- The monitor emits changes in a strictly increasing sequence, synchronously and in order. The callback contract is "record and return": no database, network or goroutine. This is tested with a Sender that never answers and with the database closed.
 
 ## Interaction lifecycle
 
 1. discordgo delivers an `InteractionCreate` event on the gateway.
-2. `Bot.serve` (panic-safe) calls `handleInteraction`, which first runs `Authorizer.Authorize(guildID, userID)`. This happens for **every** interaction type, so no handler is reachable without being on an allowlist in the configured guild. Rejections get a generic ephemeral message and a WARN log.
-3. Commands are rate limited per user (6 per 10 seconds), then acknowledged immediately with a deferred ephemeral response (Discord requires an answer within 3 seconds; Home Assistant may be slower).
-4. `commands.Registry.Run` enforces the command's minimum level (user or admin), parses options, and calls `entities.Service`.
+2. `Bot.serve` calls `handleInteraction`, which first runs `Authorizer.Authorize(guildID, userID)` for **every** interaction type. Rejections get a generic ephemeral message and a WARN log.
+3. Commands are rate limited per user (6 per 10 seconds), then acknowledged immediately with a deferred ephemeral response (Discord requires an answer within 3 seconds).
+4. `commands.Registry.Run` enforces the command's minimum level, refuses a request containing an option type it cannot parse, and calls the services.
 5. The reply is delivered by editing the deferred response. Mentions are disabled on every message.
-6. Autocomplete requests follow the same authorization path and must answer within about 2.5 seconds; they read only the local allowlist and aliases, except administrator entity discovery, which uses the shared discovery snapshot (at most one Home Assistant fetch per 30 seconds) with a 2 second timeout.
-7. **Components and modals** (the setup wizard) take the same path: guild and user authorization first, then a separate per-user click limit (30 per 10 seconds). A click is acknowledged with a deferred message update and the message is edited afterwards. Opening a modal is the only immediate response, so it does only database work. The wizard parses the custom ID (session, rendered version, whitelisted action), loads the session from SQLite, and the setup service again requires administrator level and ownership (session user and guild) before doing anything. A stale version refreshes the panel instead of acting.
+6. Autocomplete follows the same authorization path and must answer within about 2.5 seconds. `/notifications` autocomplete is administrator-only and reads the same `monitor.Reader` as `/sensors`.
+7. Components and modals (the setup wizard) take the same path, with a separate per-user click limit (30 per 10 seconds); the setup service re-checks administrator level and session ownership.
 
 ## Authorization layers
 
@@ -40,12 +128,46 @@ Dependency direction: `discord -> {commands, wizard} -> {setup, entities} -> {au
 | --- | --- | --- |
 | Guild | `auth.Authorizer` | Interaction must come from `DISCORD_GUILD_ID` (DMs rejected) |
 | User | `auth.Authorizer` | Admin list, or optional user list; everyone else rejected |
-| Command level | `commands.Registry`, `entities.Service` | `/permissions`, `/audit`, `/setup` and `/sync` need admin, checked in both places |
-| Setup session | `setup.Service` | Every wizard operation requires administrator level and a session that belongs to the caller in this guild; anything else looks like a missing session |
+| Command level | `commands.Registry`, services | `/permissions`, `/audit`, `/setup`, `/sync` and `/notifications` need administrator level, checked at the gate and again in the service. A refusal of an administrator command is audited (`audit.Denials`: fixed reasons, rate limits, retention cap) at the two places it is decided: `Bot.reject` and `Registry.Run` |
+| Setup session | `setup.Service` | Every wizard operation requires administrator level and a session owned by the caller |
 | Entity | `entities.Permissions` | No row means no access, even for administrators |
-| Domain | `entities.Domain.Controllable`, `rest.allowedServices` | Only `light` and `switch` can be controlled; checked at grant time, at execution time, and again inside the REST client |
+| Domain | `entities.Domain.Controllable`, `rest.allowedServices` | Only `light` and `switch` can be controlled |
+| Live data | `monitor.Reader` | Re-checks level and current permission on every read; the cache grants nothing |
+| Notifications | `notify.Engine`, `notify.Service` | Sharing is read before an alert is produced and before every delivery attempt; configuration is administrator-only |
 
-Discord roles and channel permissions are never consulted.
+Discord roles and channel permissions play no part in *who may use commands*. They matter in one place: when an administrator chooses the alert channel, NeptHass checks that it is a text channel of the configured guild and that the **bot** can view it, send messages and embed links.
+
+## Home Assistant integration
+
+- **REST** is authoritative for commands: one request per use, redirects never followed, a service allowlist inside the client. It never depends on the WebSocket, so commands keep working while monitoring is down.
+- **WebSocket** feeds live state: one session, `subscribe_events` for `state_changed`, buffered events replayed after an authoritative `get_states` snapshot on every (re)connect, health reported as five separate facts. Home Assistant does not replay missed events; NeptHass never invents them and finds what changed while disconnected through the snapshot. Details: [design/sensor-monitoring.md](design/sensor-monitoring.md).
+- `Tracker` keeps the latest state of every classified `sensor` and `binary_sensor` in memory only (nothing is written to SQLite).
+- **Classification.** A sensor is classified only by its domain and `device_class` (never by entity-ID text) through the typed registry in `internal/monitor/registry.go`: one row per supported class (domain, class, labels, rule wording, binary polarity and meanings taken from Home Assistant's contract, numeric range and documented units, default cooldown, the explicit hazard flag and the rule capabilities). `monitor`, `notify` and `discord` read it; nothing else switches on a category name, an unknown class is not monitored (there is no generic fallback), and tests refuse an incomplete or inconsistent row. The inventory and the reasoning are in [design/rules-v0.5.0.md](design/rules-v0.5.0.md#3-how-sensor-support-works-today-audit).
+
+## Entities, sharing, permissions and aliases
+
+`entities.Permissions` is the allowlist (`read` or `control` per entity, nothing means no access). `entities.Discovery` keeps one immutable snapshot of compact items (30 second reuse). `/sync` records known entity IDs to report new, removed and returned entities; names and states are never stored. Aliases are stored by canonical ID and resolved only to an entity the caller already has access to. `/setup` writes the same permission table through one atomic transaction with audit entries, and a session is a JSON draft saved with a compare-and-swap on a version counter, so two clicks cannot both win and a replay writes nothing. Details: [design/interactive-setup.md](design/interactive-setup.md).
+
+## Notification pipeline
+
+```mermaid
+flowchart TD
+  M["monitor change<br/>(ordered, live / replay / snapshot)"] --> H["Engine.OnChange<br/>atomic rule-set load, O(1)"]
+  H --> MB["mailbox<br/>one slot per watched entity<br/>keeps latest state + first qualifying transition"]
+  MB --> EV["evaluator<br/>baseline, re-arm, cooldown,<br/>sharing check, message build"]
+  EV --> Q{"lane"}
+  Q -->|"leak, down, recovery, digest"| QC["critical lane (32)"]
+  Q -->|"other alerts"| QN["normal lane (64)"]
+  QC --> D["dispatcher"]
+  QN --> D
+  D --> R{"recheck sharing,<br/>TTL 10 min, breaker,<br/>token bucket"}
+  R -->|"ok"| S["Sender.Send"] --> DR["Discord REST"]
+  R -->|"retryable / 429"| RT["requeue with backoff<br/>(same deadline)"] --> D
+  R -->|"revoked, expired, permanent,<br/>overflow"| X["counted drop"] --> RS["resync flag"] --> DG["one digest of CURRENT state<br/>when queues have drained"] --> QC
+  W["health watcher (10 s)"] --> MD["monitoring-down state machine<br/>5 min, one alert, recovery only<br/>after the alert was delivered"] --> QC
+```
+
+What the pipeline guarantees and what it does not (best-effort delivery with bounded staleness and possible duplicates, no persisted outbox, first observation silent, cooldown semantics) is specified in [design/notifications.md](design/notifications.md); it is not repeated here so there is one source of truth.
 
 ## Data model (SQLite)
 
@@ -54,55 +176,64 @@ Migrations are embedded from `migrations/`, applied in order inside transactions
 | Table | Purpose |
 | --- | --- |
 | `entity_permissions` | entity ID, `read`/`control`, who granted it, when |
-| `command_audit_logs` | control attempts and permission changes with outcome |
+| `command_audit_logs` | control attempts, permission and notification changes with outcome |
 | `entity_aliases` | canonical entity ID to alias, unique case-insensitively (v0.2.0) |
 | `setup_sessions` | persisted wizard sessions: JSON draft, step, status, version, expiry (v0.2.0) |
-| `known_entities` | minimal /sync registry: entity ID, domain, first/last seen, missing since (v0.2.0) |
+| `known_entities` | minimal `/sync` registry: entity ID, domain, first/last seen, missing since (v0.2.0) |
+| `notification_settings` | per guild: alert channel, enabled flag and the time of the last start-up summary; no row means disabled |
+| `notification_rules` | one row per rule, at most 200, unique per entity, kind and duration; duration, clear value and the unit the threshold is bound to (v0.5.0) |
+| `notification_marks` | one row per delivered hazard alert: rule, Home Assistant episode identity, delivery time (v0.5.0) |
 | `schema_migrations` | applied migrations and checksums |
 
-Each package owns the SQL for its own table. Timestamps are fixed-width UTC text so they sort chronologically. The database runs in WAL mode with foreign keys on and a 5 second busy timeout; the file is created with owner-only permissions. Tables for later milestones are added by those milestones' migrations, not before: migration 0003 (v0.4.0) adds only `notification_settings` and `notification_rules`, and there is deliberately **no outbox table**, because pending notifications are held in memory only (see [design/notifications.md](design/notifications.md)). Migration 0002 only adds tables, so a v0.1.0 database upgrades in place with its permissions and audit log intact; the design notes are in [design/interactive-setup.md](design/interactive-setup.md).
+Each package owns the SQL for its own tables. Timestamps are fixed-width UTC text so they sort chronologically. The database runs in WAL mode with foreign keys on; the file is created with owner-only permissions. There is deliberately **no outbox table**: pending notifications live in memory only. Migrations 0002 and 0003 only add tables, so older databases upgrade in place, but an older binary refuses an upgraded database, so a downgrade means restoring a backup.
 
-## Failure handling
+## Failure boundaries
 
-- **Discord unreachable at start:** token verification and gateway connection are retried with exponential backoff and jitter (1 s up to 1 min). A rejected token (HTTP 401) is permanent and stops the process with a clear error.
-- **Discord drops after start:** discordgo reconnects and resumes the gateway by itself.
-- **Home Assistant unreachable at start:** logged as a warning; NeptHass keeps running and uses it once it answers. A rejected token stops the process (a restart cannot fix it).
-- **Home Assistant unreachable later:** commands answer with a friendly error; each request has a timeout and redirects are never followed.
-- **Shutdown:** SIGTERM or SIGINT cancels the root context; the monitor closes its WebSocket and returns, the Discord session is closed and the database released. Shutdown waits for the monitor and the audit retention task.
+| Failure | Contained by | Result |
+| --- | --- | --- |
+| Discord gateway drops | discordgo reconnect and resume | commands pause; alerts keep flowing over REST |
+| Discord REST slow, failing or rate limited | dispatcher: backoff, `retry_after`, breaker, TTL | monitoring and commands are unaffected; losses are counted and reconciled by a digest |
+| Alert channel deleted or permission lost | permanent-failure classification and breaker | visible in `/notifications status` and `/health`; rules are kept |
+| Home Assistant REST down | per-request timeout, friendly error | monitoring and alerts continue |
+| Home Assistant WebSocket down | monitor reconnect with backoff, snapshot reconciliation | `/sensors` marks data stale; one monitoring-down alert after five minutes |
+| SQLite error during a reload | previous configuration stays in force, degraded health, retry every tick | never "saved but silently inactive" |
+| Crash or restart | process supervisor (Docker restart policy) | queued alerts are lost; rules and settings persist; baselines are re-seeded silently |
+
+## Security assumptions
+
+- The host, the container and the administrators are trusted; NeptHass defends against unauthorized Discord users, hostile sensor names and mistakes, not against a compromised host.
+- Discord authenticates interaction senders (gateway events are authenticated by the bot token); Home Assistant is trusted as far as possession of the configured token implies, and everything it sends is validated.
+- Secrets live in the environment or secret files, are redacted from logs and are never entered in Discord.
+- Everyone who can read the alert channel sees the alerts. Channel privacy is the operator's responsibility.
 
 ## Logging and secrets
 
-`log/slog`, text or JSON. Credentials are `config.Secret` values that print as `[REDACTED]` everywhere, and the logger additionally scrubs the literal secret values from messages, strings and errors. discordgo's own log lines are routed through the same logger (its only hook is a package-level variable, the one piece of global state in the program).
+`log/slog`, text or JSON. Credentials are `config.Secret` values that print as `[REDACTED]` everywhere, and the logger scrubs the literal secret values from messages and errors. discordgo's own log lines are routed through the same logger (its only hook is a package-level variable, the one piece of global state in the program). Notification code logs reasons and categories only.
 
 ## Design decisions
 
 - **Pure-Go SQLite (`modernc.org/sqlite`)** instead of CGO: a static binary, a distroless image, trivial cross-compilation.
-- **Standard library first:** configuration parsing, HTTP, logging, migrations and rate limiting use only the standard library. Runtime dependencies are discordgo and the SQLite driver.
-- **REST for commands, WebSocket for monitoring:** commands read and control through REST (authoritative, one request per use). Live sensor state comes from one WebSocket connection (v0.3.0). The REST path never depends on the WebSocket, so commands keep working while monitoring is down.
+- **Standard library first.** Runtime dependencies are discordgo and the SQLite driver.
+- **REST for commands, WebSocket for monitoring.** The REST path never depends on the WebSocket.
+- **An ordered change feed, not polling.** The monitor tells the engine what changed, in order, without blocking; the engine owns its own queues.
+- **Best-effort alerts with an honest failure model** instead of an outbox: see [design/notifications.md](design/notifications.md).
 
-## Interactive setup (v0.2.0)
+## Extending safely, and what to leave alone
 
-The wizard is an explicit state machine (`internal/setup`): steps `health, discover, permissions, aliases, review, done`, events `next, back, confirm, cancel`, per-step guards, and draft operations that are only accepted at their own step. A session is a JSON draft (selected entities with desired access and alias, plus the base each was derived from) in `setup_sessions`, saved with a compare-and-swap on a `version` counter.
+Safe, well-tested extension points:
 
-- **Concurrency.** Two simultaneous clicks: one wins, the other gets a refreshed panel. One active session per administrator and guild (partial unique index); different administrators are independent.
-- **Replay and stale panels.** Component IDs carry the session version they were rendered for. The confirmation additionally applies only to the reviewed version, and applying marks the session completed in the same transaction as the writes, so a replay writes nothing.
-- **Atomic apply.** One transaction: verify the session, re-read the live configuration, detect changes made outside the session (per field), validate (grant rule, entity exists, alias uniqueness), write permissions and aliases, write audit entries, complete the session. Any failure rolls everything back. Home Assistant is queried before the transaction.
-- **Stale confirmations.** If an entity changed outside the session, apply writes nothing, rebases the draft onto the live state, bumps the version (killing the old confirmation) and sends the administrator back to review.
-- **Discovery and sync.** `entities.Discovery` keeps one immutable snapshot of compact items (30 second reuse; Refresh, `/sync` and apply always refetch). `/sync` additionally records entity IDs in `known_entities` to report new, removed and returned entities across restarts; names and states are never stored.
-- **Aliases.** Stored by canonical ID; resolution tries an entity ID first and only resolves an alias to an entity the caller already has the required access on.
+- **Rule semantics** in `internal/notify` (`rules.go`, the evaluator in `engine.go`, rule validation in `service.go`) and the `/notifications` options in `internal/discord/commands`. Rule evaluation is pure and deterministic with an injected clock.
+- **New message kinds** (`message.go`, `internal/discord/notifytext.go`).
+- **New commands** in `internal/discord/commands`, with the level enforced by the registry.
 
-## Sensor monitoring (v0.3.0)
+Leave alone without evidence that it is wrong: the mailbox, the two lanes, the dispatcher, the circuit breaker and the monitoring-down state machine (stress-tested at constrained CPU, with regression tests that fail when the behavior is removed), and the monitor's reconciliation (it is the single source of truth for live state).
 
-The full design, protocol and rationale are in [design/sensor-monitoring.md](design/sensor-monitoring.md). In short:
+## Known technical debt
 
-- `internal/monitor.Monitor` is created in `serve()`, started in the application's background `WaitGroup` and stopped by the same context as the bot. There is no global state.
-- Each connection is an `internal/homeassistant/ws.Session` with exactly two goroutines (reader and pinger). A new session is never dialed before the previous one has been closed and joined, so a subscription can never be duplicated.
-- The connection moves through `connecting, authenticating, subscribing, synchronizing, ready`, and `reconnecting` (backoff) after any failure. Health is five separate facts (transport, authentication, subscription, snapshot, proof of life); `/health` shows them separately and only `ready` plus a recent frame is "healthy".
-- After every (re)connect NeptHass subscribes to `state_changed`, buffers events, fetches `get_states`, applies the snapshot as authoritative, then replays the buffered events through the per-sensor ordering rule (`last_updated`). Home Assistant does not replay missed events, and NeptHass never invents them.
-- `Tracker` keeps the latest state of every classified `sensor`/`binary_sensor` (temperature, humidity, battery, motion, door, window, water leak, battery low) in memory only: duplicates and stale events are dropped, memory is bounded, nothing is written to SQLite and there is no migration.
-- `Reader` is the only way monitored data reaches a Discord user. It re-checks the caller's level and the entity's *current* permission on every read, so the cache grants nothing and revocation is immediate. `/sensors` and the `/health` monitoring line are built on it.
-- Dependency direction: `discord/commands -> monitor -> {entities, auth, config, homeassistant/ws}`. `monitor` knows nothing about Discord.
-
-## Notifications (v0.4.0)
-
-`internal/notify` turns the monitor's ordered change feed into alerts: a per-entity mailbox fed by `Config.OnChange` (no I/O in the callback), an evaluator, two bounded delivery lanes, and a dispatcher that talks to a transport-neutral `Sender`. `internal/discord` supplies the Discord REST sender, channel validation and the `/notifications` command; `cmd/nepthass` wires them (monitor, then engine, then bot) and joins the engine at shutdown. Configuration lives in two SQLite tables (migration 0003); queues and cooldown state are in memory only. Full design and guarantees: [design/notifications.md](design/notifications.md).
+1. `engine.go` combines the evaluator, the stateful-rule replay, duration firing, the digest, the watcher and health reporting; `initialstate.go` already holds the start-up model. Splitting the evaluator and the duration scheduler into their own files is the next cleanup.
+2. The test clock is copied into three test packages (`internal/notify`, `internal/discord`, `tests/integration`); a shared test helper would prevent drift.
+3. `Engine` has no outcome event, so tests poll `Health()` counters with a bounded deadline.
+4. Alert-channel validation uses discordgo's session state first; the bot connects with the `Guilds` intent only, so changes to the bot's own roles may not reach the cache until a restart. A failed send still surfaces the real problem.
+5. `Notifier.Send` reads the notification settings from SQLite on every send.
+6. Stateful rules (a duration or a clear value) keep a bounded ordered trail per entity; plain immediate rules keep the v0.4.0 coalescing latch. Two paths exist on purpose (the plain path is the differential oracle of the existing tests); unifying them is possible but not free.
+7. `discord.New` sets discordgo's package-level logger hook, so bots cannot be created concurrently (a test constraint, not a production one).

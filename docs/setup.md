@@ -79,6 +79,17 @@ Run `/setup` (administrators only). The wizard is private to you:
 
 Other people can use NeptHass once their user ID is in `DISCORD_ALLOWED_USER_IDS` (or `DISCORD_ADMIN_USER_IDS`); restart the container after changing it. They see only what an administrator shared.
 
+## 7. Optional: alerts
+
+Notifications are **disabled until an administrator sets a channel**, so nothing changes until you opt in.
+
+1. Create or choose a **private** text channel. Everyone who can read it will see the alerts, including sensor names and states.
+2. Give the bot **View Channel**, **Send Messages** and **Embed Links** in that channel (check the channel's own permission overwrites as well as the server roles). The invite link above grants no permissions, so this is a manual step.
+3. Run `/notifications channel` and pick the channel. NeptHass checks that it is a text channel of your server and that the bot can post there.
+4. Share the sensors you want alerts for (`/setup` or `/permissions allow`), then add rules with `/notifications add`. Send a test with `/notifications test`.
+
+Alerts are best-effort (10 minute staleness bound, possible duplicates), queued alerts are lost if NeptHass restarts, and a sensor that is already in its alert state when NeptHass starts is not announced. See [commands.md](commands.md#notifications) and [design/notifications.md](design/notifications.md).
+
 ## Networking
 
 The default `compose.yaml` uses host networking so `HA_URL=http://127.0.0.1:8123` reaches Home Assistant running on the same host (Linux only). NeptHass opens no ports.
@@ -142,3 +153,19 @@ The upgrade was verified on a copy of a real v0.1.0 database: permissions and au
 - If Home Assistant sits behind a reverse proxy, allow WebSocket upgrades on `/api/websocket`.
 - Run `/health`: the WebSocket line should read "Healthy" within seconds of start. Share the sensors you want people to see live (`/setup`), then try `/sensors`.
 - Live sensor state is not stored: after a restart it is empty until the first synchronization finishes.
+
+### From v0.3.0 to v0.4.0
+
+1. **Back up first** (see "Data, retention and backups" above). Migration 0003 only adds two tables (`notification_settings` and `notification_rules`), but a v0.3.0 build **refuses to start on an upgraded database** ("database schema is newer than this build supports"); going back means restoring the backup, and notification settings created since the upgrade are lost with it.
+2. There are **no new environment variables** and no configuration changes. Rebuild and restart as usual: `git pull && docker compose up -d --build`.
+3. Notifications stay **disabled** until an administrator runs `/notifications channel`; `/health` shows a Notifications line that reads "Disabled". The slash commands are re-registered at start, so `/notifications` appears after the first start.
+4. Existing permissions, aliases, setup sessions and the audit log are untouched.
+5. Pending alerts live in memory only, so restarting NeptHass (including this upgrade) loses any alert that was queued at that moment.
+
+### From v0.4.0 to v0.5.0
+
+1. **Back up first** (see "Data, retention and backups" above). Migration 0004 rebuilds the notification rules table inside one transaction, keeping every rule, its ID and the ID sequence, and adds a table for hazard delivery marks and a settings column. A v0.4.0 build **refuses to start on an upgraded database**; going back means restoring the backup, and rules or marks created since the upgrade are lost with it.
+2. There are **no new environment variables**. Rebuild and restart as usual: `git pull && docker compose up -d --build`.
+3. **Check `/notifications status` and `/notifications list` after the upgrade.** Rules on humidity and battery sensors are bound to their unit automatically as soon as the sensor reports. **Temperature rules created before the upgrade show "not evaluating"** until an administrator runs `/notifications unit rule:<n>`, because NeptHass cannot know whether the threshold was written in °C, °F or K. Until then those rules send nothing.
+4. **Start-up behavior changed.** A water leak that is already wet when NeptHass starts is announced once, and other sensors already in an alert state are listed in one summary after about two minutes. After the first start with v0.5.0 you may therefore see one summary and, if a leak sensor is wet, one alert; this is expected.
+5. New options: `for` (a delay in minutes) and `clear` (a recovery value) on `/notifications add`; `garage_door` and `opening` sensors can now be watched.

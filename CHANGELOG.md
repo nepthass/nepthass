@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-31
+
+Fifth milestone: richer rules and safer start-up. Verified by 474 automated tests, 48 tests against a real Home Assistant and the mandatory real-Discord smoke checks; see the [release readiness report](docs/development/v0.5.0-release-readiness.md).
+
+### Added
+
+- **Duration rules.** `/notifications add ... for:<minutes>` (1 to 1440) alerts only after the condition has held that long, once per episode, for door, window, garage door, opening, motion, battery-low and numeric sensors. The count uses NeptHass's own clock and **never fires early**: it is cancelled when the condition clears or the sensor becomes unavailable, re-reads the sensor when it comes due, does not fire while monitoring is down, and restarts after an outage or a restart (messages say "at least" when NeptHass did not see the condition begin). A sensor can have several rules of one kind with different durations. Water leak alerts stay immediate.
+- **Hysteresis.** `clear:<value>` on a numeric rule: it re-arms only after the reading passes the clear value, so a temperature hovering around 30 °C does not alert repeatedly.
+- **Unit-safe thresholds.** A numeric threshold is bound to the unit its sensor reports (temperature: °C, °F or K; humidity and battery: %). A reading in another unit is never compared with it; a rule whose sensor changed unit stops evaluating until the unit returns.
+- **`/notifications unit`** binds a rule created before v0.5.0 to its sensor's current unit. Humidity and battery rules are bound automatically once (audited as the system); temperature rules need an administrator, because the unit cannot be known.
+- **Initial-state alerting.** A water leak that is already wet when NeptHass starts (or when its rule is created) is announced once, worded as what Home Assistant reports and not as a new event; other conditions already present are listed in **one start-up summary** after two minutes. At most three individual hazard alerts per start and one summary every ten minutes, across restarts. Delivered hazard alerts leave a small mark so a restart does not repeat them.
+- **Audit of refused administrator commands**: allowed users who are not administrators, strangers, other servers and direct messages, with fixed reasons, no option values, rate limits and a retention cap.
+- `garage_door` and `opening` binary sensors (on means open) are monitored and can have rules.
+- A typed sensor capability registry replaces the scattered per-category switches.
+- Virtual garage door and opening sensors and scenarios in the development Home Assistant; a manual QA group J in the smoke tests.
+
+### Changed
+
+- **A first observation is no longer always silent**: see initial-state alerting above. Behavior after a reconnect inside one process is unchanged.
+- `/notifications add`, `list`, `status` and the autocomplete show durations, clear values, units, dormant rules and start-up information.
+- Rules are unique per sensor, kind and duration.
+
+### Database
+
+- Migration `0004` rebuilds `notification_rules` in one transaction (every rule, ID and the ID sequence preserved; existing rules become immediate rules with no clear value) and adds `notification_marks` and `notification_settings.startup_summary_at`. **Back up the database first**: a v0.4.0 binary refuses a database that has migration 0004 (restore the backup to go back).
+
+### Known limitations
+
+- A start-up summary or hazard alert can be repeated **once** after a crash that happens after Discord accepted a message and before NeptHass wrote its mark.
+- A duration alert may say "at least" even for an opening NeptHass was watching, when its rule is loaded in the very instant that change is being delivered; it is never early.
+- Duration counts are in memory: after a restart or a monitoring outage they restart, so an alert can be later than the real duration (never earlier).
+- Smoke, gas and carbon monoxide are not supported; they need a dedicated safety policy.
+- No persisted outbox, a 10 minute staleness bound, one alert channel and possible duplicates remain as in v0.4.0.
+- Real-Discord QA covered the mandatory smoke checks only (start-up alerts and summary, authorization and audit). The optional check for a channel without Send Messages (V32) was not run, and the other rows of group J are verified by automated tests against a stub Discord server; see [docs/development/smoke-tests.md](docs/development/smoke-tests.md).
+
 ## [0.4.0] - 2026-10-30
 
 Fourth milestone: smart notifications.
@@ -47,7 +82,7 @@ Fourth milestone: smart notifications.
 - There is **no persisted outbox**: queued alerts are lost on a crash or restart. Delivery is best-effort with possible duplicates and a 10 minute TTL.
 - A first observation is silent, so a leak that is already wet when NeptHass starts or when its rule is created is not announced.
 - One alert channel per server; no direct messages, quiet hours or rule logic (v0.5.0).
-- Real Discord was exercised manually by the maintainer on a test server (user-reported and partial, see [docs/development/smoke-tests.md](docs/development/smoke-tests.md)). Not exercised against real Discord: an actual HTTP 429, a Discord-only outage and a second user; those are covered by stub-server tests. The v0.3.0 to v0.4.0 downgrade test is deferred while the project is in private pre-v1.0.0 development.
+- Real Discord was exercised manually by the maintainer on a test server (partial; see the [known gaps](docs/development/smoke-tests.md#known-gaps)). Not exercised against real Discord: an actual HTTP 429, a Discord-only outage and a second user; those are covered by stub-server tests. The v0.3.0 to v0.4.0 downgrade test is deferred while the project is in private pre-v1.0.0 development.
 - A non-administrator's refused `/notifications` command is not audited (the command gate does not audit refusals for any administrator command).
 
 ## [0.3.0] - 2026-10-29
@@ -161,7 +196,8 @@ First milestone: the foundation.
 - A single Discord guild is supported.
 - `/devices` lists 10 entities per page via a `page` option; interactive pagination arrives with the dashboard.
 
-[Unreleased]: https://github.com/nepthass/nepthass/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/nepthass/nepthass/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/nepthass/nepthass/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/nepthass/nepthass/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nepthass/nepthass/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nepthass/nepthass/compare/v0.1.0...v0.2.0

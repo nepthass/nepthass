@@ -25,6 +25,18 @@ template:
         device_class: window
         state: "{{ is_state('input_boolean.nepthass_dev_sim_window_open', 'on') }}"
         availability: "{{ is_state('input_boolean.nepthass_dev_offline_window', 'off') }}"
+      - name: NeptHass Dev Garage Door
+        unique_id: nepthass_dev_garage_door
+        default_entity_id: binary_sensor.nepthass_dev_garage_door
+        device_class: garage_door
+        state: "{{ is_state('input_boolean.nepthass_dev_sim_garage_door_open', 'on') }}"
+        availability: "{{ is_state('input_boolean.nepthass_dev_offline_garage_door', 'off') }}"
+      - name: NeptHass Dev Opening
+        unique_id: nepthass_dev_opening
+        default_entity_id: binary_sensor.nepthass_dev_opening
+        device_class: opening
+        state: "{{ is_state('input_boolean.nepthass_dev_sim_opening_open', 'on') }}"
+        availability: "{{ is_state('input_boolean.nepthass_dev_offline_opening', 'off') }}"
       - name: NeptHass Dev Water Leak
         unique_id: nepthass_dev_water_leak
         default_entity_id: binary_sensor.nepthass_dev_water_leak

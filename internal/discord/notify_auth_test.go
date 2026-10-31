@@ -53,7 +53,11 @@ func (f *authFake) SetRuleEnabled(context.Context, auth.Actor, int64, bool) erro
 	return nil
 }
 func (f *authFake) RemoveRule(context.Context, auth.Actor, int64) error { f.hit(); return nil }
-func (f *authFake) SendTest(context.Context, auth.Actor) error          { f.hit(); return nil }
+func (f *authFake) ConfirmUnit(context.Context, auth.Actor, int64) (string, error) {
+	f.hit()
+	return "°F", nil
+}
+func (f *authFake) SendTest(context.Context, auth.Actor) error { f.hit(); return nil }
 func (f *authFake) Status(context.Context, auth.Actor) (commands.NotificationStatus, error) {
 	f.hit()
 	return commands.NotificationStatus{}, nil

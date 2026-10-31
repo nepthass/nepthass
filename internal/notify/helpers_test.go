@@ -63,7 +63,7 @@ func (f *fixture) share(id string, access entities.Access) {
 func (f *fixture) monitored(id string, cat monitor.Category, raw string) {
 	f.t.Helper()
 	f.now = f.now.Add(time.Second)
-	f.tracker.Apply(monitor.Update{ID: entities.ID(id), Category: cat, Name: "Name", Raw: raw, LastChanged: f.now, LastUpdated: f.now}, f.now)
+	f.tracker.Apply(monitor.Update{ID: entities.ID(id), Category: cat, Name: "Name", Raw: raw, Unit: unitFor(cat), LastChanged: f.now, LastUpdated: f.now}, f.now)
 }
 
 // ready shares a sensor and makes it monitored.
@@ -102,3 +102,12 @@ func (f *fixture) lastAudit() audit.Entry {
 
 func fl(v float64) *float64              { return &v }
 func dur(d time.Duration) *time.Duration { return &d }
+
+// unitFor is the first documented unit of a numeric category ("" for a binary
+// one), so a test sensor reports a unit a numeric rule can be bound to.
+func unitFor(c monitor.Category) string {
+	if s, ok := monitor.SpecFor(c); ok && len(s.Units) > 0 {
+		return s.Units[0]
+	}
+	return ""
+}

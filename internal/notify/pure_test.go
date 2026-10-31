@@ -44,6 +44,9 @@ func TestEnters_everyCategoryTriggerAndUnreliableTransition(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.r.Kind != KindState {
+				tc.r.Unit = unitFor(tc.cat) // a numeric rule is bound to the unit its sensor reports
+			}
 			got, unrel := enters(tc.r, chg("x.sensor", tc.cat, tc.hadPrev, tc.prev, tc.cur, live, 1))
 			if got != tc.want || unrel != tc.fromUnrel {
 				t.Errorf("enters = %v (fromUnreliable %v), want %v (%v)", got, unrel, tc.want, tc.fromUnrel)
@@ -91,7 +94,7 @@ func TestMailbox_firstObservationAndRemovalNeverLatch_andRequestAReset(t *testin
 	mb.record(chg("x.sensor", monitor.CategoryDoor, false, "", "on", monitor.SourceSnapshot, 1), rs)
 	slots, order, _ := mb.drain()
 	s := slots["x.sensor"]
-	if len(order) != 1 || s.nLatch != 0 || !s.reset || !s.anySnapshot || s.cur.Raw != "on" {
+	if len(order) != 1 || len(s.latches) != 0 || !s.reset || !s.anySnapshot || s.cur.Raw != "on" {
 		t.Fatalf("a first observation is a baseline: %+v", s)
 	}
 
@@ -101,14 +104,14 @@ func TestMailbox_firstObservationAndRemovalNeverLatch_andRequestAReset(t *testin
 	mb.record(rm, rs)
 	slots, _, _ = mb.drain()
 	s = slots["x.sensor"]
-	if !s.removed || !s.reset || s.haveCur || s.nLatch != 0 {
+	if !s.removed || !s.reset || s.haveCur || len(s.latches) != 0 {
 		t.Fatalf("a removal discards the pending latch and asks every rule to re-baseline: %+v", s)
 	}
 
 	mb.record(rm, rs) // removed again, then re-added as a first observation
 	mb.record(chg("x.sensor", monitor.CategoryDoor, false, "", "off", monitor.SourceLive, 4), rs)
 	slots, _, _ = mb.drain()
-	if s = slots["x.sensor"]; s.removed || !s.haveCur || !s.reset || s.nLatch != 0 {
+	if s = slots["x.sensor"]; s.removed || !s.haveCur || !s.reset || len(s.latches) != 0 {
 		t.Errorf("re-addition is a fresh baseline: %+v", s)
 	}
 }

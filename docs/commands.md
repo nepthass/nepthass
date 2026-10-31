@@ -107,12 +107,13 @@ Fetches Home Assistant's entities and reports: how many there are, how many can 
 | Subcommand | What it does |
 | --- | --- |
 | `channel <channel>` | Choose the text channel that receives alerts. NeptHass checks that it exists, belongs to this server, is a text channel (not voice, forum, announcement, thread or DM), and that the bot can View Channel, Send Messages and Embed Links. The reply warns that **everyone who can read that channel will see the alerts**. |
-| `add <entity> [above] [below] [cooldown]` | Create a rule. Without `above`/`below` it is a *state* rule for door, window, motion, leak and battery-low sensors. With `above` or `below` (not both) it is a threshold rule for temperature, humidity and battery-level sensors. `cooldown` is in minutes, 0 to 1440; 0 disables it, omitting it uses the default for the sensor type. |
-| `list` | All rules with their number, name, what they watch and their status: *active*, *paused*, *needs sharing*, *not monitored* or *incompatible*. |
+| `add <entity> [above] [below] [clear] [for] [cooldown]` | Create a rule. Without `above`/`below` it is a *state* rule for door, window, garage door, opening, motion, water leak and battery-low sensors. With `above` or `below` (not both) it is a threshold rule for temperature, humidity and battery-level sensors, **bound to the unit the sensor reports now**. `clear` (numeric rules): the value the reading must pass again before the rule can alert again (below the threshold for `above`, above it for `below`). `for` (1 to 1440 minutes): alert only after the condition has held that long, never for a water leak. `cooldown` (0 to 1440 minutes; 0 for none). |
+| `list` | All rules with their number, name, what they watch (including the clear value, the duration and the unit) and their status: *active*, *paused*, *needs sharing*, *not monitored*, *incompatible*, or **not evaluating** (unit not confirmed, unit changed) with what to do about it. |
 | `pause [rule]` / `resume [rule]` | Pause or resume one rule; **without a rule, pause or resume all notifications**. |
 | `remove <rule>` | Delete a rule. |
+| `unit <rule>` | Bind a rule created before v0.5.0 to its sensor's **current** unit, on your say-so that its threshold is written in that unit. Only rules that need it are offered. A unit is never rebound. |
 | `test` | Send a test message to the alert channel. |
-| `status` | Channel, rule counts, last delivery and failure, queue depth, dropped counts by reason, circuit-breaker and monitoring-down state. |
+| `status` | Channel, rule counts (including rules waiting for a unit), last delivery and failure, queue depth, dropped counts by reason, pending and fired duration counts, what was announced since NeptHass started, circuit-breaker and monitoring-down state. |
 
 Examples:
 
@@ -121,6 +122,9 @@ Examples:
 /notifications add entity:Front door
 /notifications add entity:Living room temperature above:28 cooldown:30
 /notifications add entity:Phone battery below:15
+/notifications add entity:Front door for:10
+/notifications add entity:Attic temperature above:30 clear:28 for:5
+/notifications unit rule:4
 /notifications pause rule:3
 /notifications status
 ```
@@ -128,8 +132,9 @@ Examples:
 Details worth knowing:
 
 - Autocomplete offers only sensors that are **shared and currently monitored**, shown by name; entity IDs are never shown in lists, status or alerts.
-- `add` explains when monitoring has not synchronized yet, and refuses unshared, unmonitored or incompatible entities, duplicate rules (one per entity and kind), thresholds outside +/-1,000,000 and the 201st rule.
-- Default cooldowns: door and window 1 minute, motion 5 minutes, leak and temperature and humidity 15 minutes, battery 6 hours. A suppressed alert is not deferred and does not repeat later.
+- `add` explains when monitoring has not synchronized yet, and refuses unshared, unmonitored or incompatible entities, a duplicate (one rule per entity, kind **and duration**), thresholds outside +/-1,000,000, a sensor whose unit is missing or not documented for its type, a duration or clear value the sensor type does not support (a water leak is always immediate), a `clear` on the wrong side of the threshold, and the 201st rule. If the sensor is **already in the rule's alert state**, the reply says what will happen: a water leak sends a critical alert, a duration counts from now, any other rule waits for the next change.
+- Default cooldowns: door, window, garage door and opening 1 minute, motion 5 minutes, leak, temperature and humidity 15 minutes, battery 6 hours. A suppressed alert is not deferred and does not repeat later.
+- A rule created before v0.5.0 on a temperature sensor shows **not evaluating** until you run `/notifications unit`: NeptHass cannot know whether its threshold was written in °C, °F or K. Humidity and battery rules are bound automatically. A rule whose sensor later changes unit is also not evaluating (it resumes if the unit returns); delete it and add it again to use the new unit.
 - An unshared sensor's rules stay in `list` as *needs sharing* and resume when it is shared again.
 - If a change is saved but cannot be loaded into the running engine, the reply says so ("saved but **not active**"), `status` and `/health` show *Degraded*, and NeptHass keeps retrying.
 
