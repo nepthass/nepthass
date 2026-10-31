@@ -13,6 +13,8 @@ const (
 	CategoryDoor        Category = "door"
 	CategoryWindow      Category = "window"
 	CategoryLeak        Category = "leak" // device_class moisture
+	CategoryGarageDoor  Category = "garage_door"
+	CategoryOpening     Category = "opening"
 )
 
 // Domains NeptHass monitors.
@@ -21,26 +23,11 @@ const (
 	DomainBinarySensor = "binary_sensor"
 )
 
-type classKey struct{ domain, deviceClass string }
-
-// classes is the whole classification table. Extending monitoring to a new
-// kind of sensor is one row here plus its interpretation in meaning.go.
-var classes = map[classKey]Category{
-	{DomainSensor, "temperature"}:    CategoryTemperature,
-	{DomainSensor, "humidity"}:       CategoryHumidity,
-	{DomainSensor, "battery"}:        CategoryBattery,
-	{DomainBinarySensor, "battery"}:  CategoryBatteryLow,
-	{DomainBinarySensor, "motion"}:   CategoryMotion,
-	{DomainBinarySensor, "door"}:     CategoryDoor,
-	{DomainBinarySensor, "window"}:   CategoryWindow,
-	{DomainBinarySensor, "moisture"}: CategoryLeak,
-}
-
 // Classify returns the category for a domain and device class, and false when
-// NeptHass does not monitor that kind of sensor.
+// NeptHass does not monitor that kind of sensor. The registry is the only table.
 func Classify(domain, deviceClass string) (Category, bool) {
-	c, ok := classes[classKey{domain, deviceClass}]
-	return c, ok
+	s, ok := Lookup(domain, deviceClass)
+	return s.Category, ok
 }
 
 // Monitored reports whether a domain can contain monitored sensors at all.
@@ -50,29 +37,21 @@ func Monitored(domain string) bool {
 
 // Numeric reports whether the category carries a number rather than on/off.
 func (c Category) Numeric() bool {
-	return c == CategoryTemperature || c == CategoryHumidity || c == CategoryBattery
+	s, ok := SpecFor(c)
+	return ok && s.Value == ValueNumeric
+}
+
+// Hazard reports whether the category is a critical hazard: immediate-only
+// alerts on the critical lane that are announced even at start-up.
+func (c Category) Hazard() bool {
+	s, ok := SpecFor(c)
+	return ok && s.Hazard
 }
 
 // Label is a short human-readable name.
 func (c Category) Label() string {
-	switch c {
-	case CategoryTemperature:
-		return "Temperature"
-	case CategoryHumidity:
-		return "Humidity"
-	case CategoryBattery:
-		return "Battery"
-	case CategoryBatteryLow:
-		return "Battery low"
-	case CategoryMotion:
-		return "Motion"
-	case CategoryDoor:
-		return "Door"
-	case CategoryWindow:
-		return "Window"
-	case CategoryLeak:
-		return "Water leak"
-	default:
-		return string(c)
+	if s, ok := SpecFor(c); ok {
+		return s.Label
 	}
+	return string(c)
 }

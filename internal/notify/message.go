@@ -98,7 +98,7 @@ type DigestLine struct {
 
 // Lane returns the lane a message travels in.
 func (m Message) Lane() Lane {
-	if m.Kind == MsgAlert && m.Category != monitor.CategoryLeak {
+	if m.Kind == MsgAlert && !m.Category.Hazard() {
 		return LaneNormal
 	}
 	return LaneCritical
@@ -110,7 +110,7 @@ func (m Message) Lane() Lane {
 func (m Message) priority() int {
 	switch m.Kind {
 	case MsgAlert:
-		if m.Category == monitor.CategoryLeak {
+		if m.Category.Hazard() {
 			return 3
 		}
 		return 1

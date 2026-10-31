@@ -350,13 +350,18 @@ func validateRule(n NewRule) error {
 	return nil
 }
 
-// compatible reports whether a rule kind fits a sensor category: state rules for
-// binary sensors, above and below for numeric ones.
+// compatible reports whether a rule kind fits a sensor category, from the
+// category's declared capabilities: state rules for binary classes, above and
+// below for numeric ones. An unknown category fits nothing.
 func compatible(k Kind, c monitor.Category) bool {
-	if k == KindState {
-		return !c.Numeric()
+	s, ok := monitor.SpecFor(c)
+	if !ok {
+		return false
 	}
-	return c.Numeric()
+	if k == KindState {
+		return s.Caps.Has(monitor.CapState)
+	}
+	return s.Caps.Has(monitor.CapThreshold)
 }
 
 func statusOf(r Rule, access entities.Access, sensor monitor.Sensor, monitored bool) RuleStatus {

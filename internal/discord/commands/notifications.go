@@ -341,15 +341,8 @@ func describeRule(it RuleItem) string {
 	case notify.KindBelow:
 		return "falls below " + formatThreshold(it.Threshold)
 	}
-	switch it.Category {
-	case monitor.CategoryMotion:
-		return "when motion is detected"
-	case monitor.CategoryLeak:
-		return "when it gets wet"
-	case monitor.CategoryBatteryLow:
-		return "when its battery is low"
-	case monitor.CategoryDoor, monitor.CategoryWindow:
-		return "when it opens"
+	if s, ok := monitor.SpecFor(it.Category); ok && s.Phrase != "" {
+		return s.Phrase
 	}
 	return "when it changes state"
 }

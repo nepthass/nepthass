@@ -79,7 +79,7 @@ func TestTracker_anExplicitDifferentClassIsNeverOverriddenByTheRetainedOne(t *te
 	t.Run("a class we do not monitor", func(t *testing.T) {
 		tr := doorTracker(t)
 
-		res := applyEvent(t, tr, "binary_sensor.door", "unavailable", map[string]any{"device_class": "garage_door"}, 5)
+		res := applyEvent(t, tr, "binary_sensor.door", "unavailable", map[string]any{"device_class": "smoke"}, 5)
 
 		if _, tracked := tr.Get("binary_sensor.door"); tracked || res.Outcome != OutcomeRemoved {
 			t.Errorf("tracked=%v result=%+v", tracked, res)

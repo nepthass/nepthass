@@ -62,9 +62,10 @@ type Interpretation struct {
 	HasValue bool
 }
 
-// Interpret derives the meaning of a raw state. For binary sensors "on" means
-// the condition is active: motion detected, door or window open, water
-// detected, battery low. Anything outside the expected values is Invalid.
+// Interpret derives the meaning of a raw state from the category's registry
+// row. For a binary class "on" and "off" have the meanings Home Assistant
+// documents for it; anything else is Invalid. A category that is not in the
+// registry has no meaning: every state other than unavailable and unknown is Invalid.
 func Interpret(c Category, raw string) Interpretation {
 	switch raw {
 	case "unavailable":
@@ -72,35 +73,23 @@ func Interpret(c Category, raw string) Interpretation {
 	case "unknown":
 		return Interpretation{Meaning: MeaningUnknown}
 	}
-	if c.Numeric() {
-		return interpretNumber(c, raw)
+	spec, ok := SpecFor(c)
+	if !ok {
+		return Interpretation{Meaning: MeaningInvalid}
 	}
-	on, off := binaryMeanings(c)
+	if spec.Value == ValueNumeric {
+		return interpretNumber(spec, raw)
+	}
 	switch raw {
 	case "on":
-		return Interpretation{Meaning: on}
+		return Interpretation{Meaning: spec.On}
 	case "off":
-		return Interpretation{Meaning: off}
+		return Interpretation{Meaning: spec.Off}
 	}
 	return Interpretation{Meaning: MeaningInvalid}
 }
 
-func binaryMeanings(c Category) (on, off Meaning) {
-	switch c {
-	case CategoryMotion:
-		return MeaningDetected, MeaningClear
-	case CategoryDoor, CategoryWindow:
-		return MeaningOpen, MeaningClosed
-	case CategoryLeak:
-		return MeaningWet, MeaningDry
-	case CategoryBatteryLow:
-		return MeaningLow, MeaningNormal
-	default:
-		return MeaningInvalid, MeaningInvalid
-	}
-}
-
-func interpretNumber(c Category, raw string) Interpretation {
+func interpretNumber(spec Spec, raw string) Interpretation {
 	// Only plain decimal numbers: ParseFloat would also accept hex floats and
 	// digit separators, which Home Assistant never sends.
 	if raw == "" || strings.ContainsAny(raw, "xXpP_") {
@@ -110,7 +99,7 @@ func interpretNumber(c Category, raw string) Interpretation {
 	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
 		return Interpretation{Meaning: MeaningInvalid}
 	}
-	if (c == CategoryHumidity || c == CategoryBattery) && (v < 0 || v > 100) {
+	if spec.Range != nil && (v < spec.Range.Min || v > spec.Range.Max) {
 		return Interpretation{Meaning: MeaningInvalid}
 	}
 	return Interpretation{Meaning: MeaningReading, Value: v, HasValue: true}

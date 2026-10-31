@@ -51,19 +51,14 @@ func reliable(s monitor.Sensor) bool {
 	return true
 }
 
-// alertMeaning is the state a state rule fires on, per binary category.
+// alertMeaning is the state a state rule fires on, from the category's registry
+// row. A numeric or unknown category has none.
 func alertMeaning(c monitor.Category) (monitor.Meaning, bool) {
-	switch c {
-	case monitor.CategoryDoor, monitor.CategoryWindow:
-		return monitor.MeaningOpen, true
-	case monitor.CategoryMotion:
-		return monitor.MeaningDetected, true
-	case monitor.CategoryLeak:
-		return monitor.MeaningWet, true
-	case monitor.CategoryBatteryLow:
-		return monitor.MeaningLow, true
+	s, ok := monitor.SpecFor(c)
+	if !ok || s.Value != monitor.ValueBinary {
+		return "", false
 	}
-	return "", false
+	return s.AlertMeaning(), true
 }
 
 // violates reports whether the sensor currently satisfies the rule. It is false
@@ -90,8 +85,8 @@ func violates(r cachedRule, s monitor.Sensor) bool {
 //   - A first observation (HadPrev false) and a removal never qualify.
 //   - A reliable, non-violating previous state qualifies.
 //   - An unreliable previous state (unavailable, unknown, invalid) does not
-//     qualify, with one deliberate exception: a leak sensor reaching wet fails
-//     loud (fromUnreliable is true so the message can say the state was uncertain).
+//     qualify, with one deliberate exception: a hazard sensor (a water leak) reaching its alert
+//     state fails loud (fromUnreliable is true so the message can say the state was uncertain).
 func enters(r cachedRule, c monitor.Change) (qualifies, fromUnreliable bool) {
 	if c.Removed || !c.HadPrev || !violates(r, c.Cur) || violates(r, c.Prev) {
 		return false, false
@@ -99,25 +94,19 @@ func enters(r cachedRule, c monitor.Change) (qualifies, fromUnreliable bool) {
 	if reliable(c.Prev) {
 		return true, false
 	}
-	if r.Kind == KindState && c.Cur.Category == monitor.CategoryLeak {
+	if r.Kind == KindState && c.Cur.Category.Hazard() {
 		return true, true
 	}
 	return false, false
 }
 
-// defaultCooldown is the cooldown of a category when the rule has no override.
-// Humidity is not in the approved list and follows temperature; the binary
-// battery-low sensor follows battery.
+// defaultCooldown is the cooldown of a category when the rule has no override:
+// the registry value (an unknown category gets 15 minutes).
 func defaultCooldown(c monitor.Category) time.Duration {
-	switch c {
-	case monitor.CategoryMotion:
-		return 5 * time.Minute
-	case monitor.CategoryDoor, monitor.CategoryWindow:
-		return time.Minute
-	case monitor.CategoryBattery, monitor.CategoryBatteryLow:
-		return 6 * time.Hour
+	if s, ok := monitor.SpecFor(c); ok {
+		return s.Cooldown
 	}
-	return 15 * time.Minute // leak, temperature, humidity
+	return 15 * time.Minute
 }
 
 // cooldownOf is the effective cooldown: a rule override (zero disables the
@@ -132,21 +121,8 @@ func cooldownOf(r cachedRule, c monitor.Category) time.Duration {
 // categoryNoun names a sensor when it has neither an alias nor a friendly name.
 // An alert never falls back to the entity ID.
 func categoryNoun(c monitor.Category) string {
-	switch c {
-	case monitor.CategoryDoor:
-		return "Door sensor"
-	case monitor.CategoryWindow:
-		return "Window sensor"
-	case monitor.CategoryMotion:
-		return "Motion sensor"
-	case monitor.CategoryLeak:
-		return "Leak sensor"
-	case monitor.CategoryBatteryLow, monitor.CategoryBattery:
-		return "Battery sensor"
-	case monitor.CategoryTemperature:
-		return "Temperature sensor"
-	case monitor.CategoryHumidity:
-		return "Humidity sensor"
+	if s, ok := monitor.SpecFor(c); ok {
+		return s.Noun
 	}
 	return "Sensor"
 }
