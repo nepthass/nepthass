@@ -48,7 +48,7 @@ func (r *Registry) sensors(ctx context.Context, req Request) Reply {
 		return Reply{Content: notSynchronizedText(res.Status)}
 	}
 	if res.Total == 0 {
-		return Reply{Content: "No monitored sensors are shared with you. An administrator can share a temperature, humidity, battery, motion, door, window or water-leak sensor with `/setup` or `/permissions allow`."}
+		return Reply{Content: "No monitored sensors are shared with you. An administrator can share a " + typeList(0) + " sensor with `/setup` or `/permissions allow`."}
 	}
 	desc, color := "", ui.ColorOK
 	if !isLive(res.Status) {
