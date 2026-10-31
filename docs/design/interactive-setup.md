@@ -69,4 +69,4 @@ No foreign keys: permissions and aliases are intentionally independent of each o
 
 ## Non-goals (later milestones)
 
-WebSocket monitoring, subscriptions, notifications, rules, the `/home` dashboard, and alias-based fuzzy matching.
+WebSocket monitoring, subscriptions, notifications, rules, and alias-based fuzzy matching.

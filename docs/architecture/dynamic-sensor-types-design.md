@@ -15,7 +15,7 @@
 - **Phase 1 (generic numeric threshold) is the smallest production-worthy MVP.** It reuses `above`/`below`, hysteresis, duration and unit binding unchanged.
 - **One small additive migration is recommended** (three columns, section 9) so a generic rule is never silently reinterpreted if a built-in row for its class ships later. Without it, a generic rule could change meaning on upgrade. No new rule kind, so no table rebuild.
 - **Smoke, gas and carbon monoxide stay outside trusted monitoring.** They can only ever have an *informational* generic rule with an unmistakable "not a safety alarm" notice. Trusted safety monitoring remains a separate, explicit, reviewed registry row.
-- **Release.** Not part of v0.6.0's Dashboard core. Recommend v0.6.x or v0.7.0, after the Dashboard has proven the shared application layer.
+- **Release.** Not part of the v1.0.0 stabilization scope. Reconsider only after the stable Discord-only release, with demonstrated demand and a separate implementation decision.
 
 ## 2. Verified current behavior
 
@@ -36,7 +36,7 @@
 
 ## 3. Product requirements
 
-R1 unknown sensors become monitorable **only** by explicit administrator action; R2 discovery, sharing, eligibility, configuration, activation and severity stay independent; R3 built-in behavior is byte-for-byte unchanged; R4 no second notification engine; R5 Discord and the Dashboard share one validation and authorization layer; R6 generic rules never claim safety status; R7 a metadata change never silently reinterprets a rule.
+R1 unknown sensors become monitorable **only** by explicit administrator action; R2 discovery, sharing, eligibility, configuration, activation and severity stay independent; R3 built-in behavior is byte-for-byte unchanged; R4 no second notification engine; R5 Discord commands call the same validation and authorization service used by the notification engine; R6 generic rules never claim safety status; R7 a metadata change never silently reinterprets a rule.
 
 ## 4. Proposed architecture
 
@@ -51,7 +51,7 @@ flowchart TD
     BI --> TRK["Tracker"]
     GEN --> TRK
     DISC --> SVC
-    TRK --> SVC["notify.Service<br/>one validation and authorization layer<br/>used by Discord and Dashboard"]
+    TRK --> SVC["notify.Service<br/>one validation and authorization layer<br/>used by Discord commands"]
     SVC --> DB[("notification_rules<br/>+ origin, bound_class, target_state")]
     DB --> ENG["Existing notify.Engine<br/>evaluation, duration, hysteresis, dedupe"]
     TRK --> ENG
@@ -93,9 +93,9 @@ Reuse: numeric uses `KindAbove`/`KindBelow` with `Threshold`, `Clear`, `Duration
 
 1. **Discovered** (always). 2. **Shared** (administrator). 3. **Monitoring eligible** (shape recognized; shown with the capability on offer). 4. **Configured** (administrator creates and confirms a rule; persisted). 5. **Active** (a reliable matching reading exists and the entity is still shared). 6. **Suspended** (dormant: see section 8, visible with a reason). The interface shows each state separately and never one "enabled" flag.
 
-**Create flow (both interfaces call the same `Service` method).** Select entity, see raw state, unit and the single capability offered, enter the threshold or target state, **review a summary that names the bound unit or raw state and states it is generic**, confirm. The server re-validates everything; the client is never trusted. Edit and delete reuse the existing rule commands; editing the threshold or target keeps the binding, changing the bound unit or class requires re-confirmation.
+**Create flow.** Select entity, see raw state, unit and the single capability offered, enter the threshold or target state, **review a summary that names the bound unit or raw state and states it is generic**, confirm. The service re-validates everything; command input is never trusted. Edit and delete reuse the existing rule commands; editing the threshold or target keeps the binding, changing the bound unit or class requires re-confirmation.
 
-**Discord.** The existing `/notify` commands gain a generic path chosen automatically from the eligible shape, with a confirmation step (the wizard component pattern already in `internal/discord/wizard`). **Dashboard.** It calls the same `notify.Service` (or its API wrapper); no rule is decided in either UI layer [code: validation already lives in `service.go`, not in the command layer].
+**Discord.** The existing `/notify` commands gain a generic path chosen automatically from the eligible shape, with a confirmation step (the wizard component pattern already in `internal/discord/wizard`). The command layer calls `notify.Service`; no rule is decided in the UI layer [code: validation already lives in `service.go`, not in the command layer].
 
 ## 8. Metadata changes
 
@@ -142,11 +142,11 @@ Additive `ALTER TABLE ... ADD COLUMN` with defaults, **no table rebuild** and no
 | Testability (10) | 5 | 3 | 2 | 1 |
 | **Total** | **3.85** | **3.90** | **3.50** | **2.30** |
 
-**Read this honestly:** A and B are nearly tied on the weighted score because A is simpler and fully safe; **A is disqualified by the product goal** (a Go change per class), which is a pass/fail gate, not a weight. B is the smallest design that passes the gate. C adds a general abstraction over a problem that needs two profiles; D fails safety. Database impact: A none, B three additive columns, C as B, D new tables. Dashboard: B and C both reuse the service layer.
+**Read this honestly:** A and B are nearly tied on the weighted score because A is simpler and fully safe; **A is disqualified by the product goal** (a Go change per class), which is a pass/fail gate, not a weight. B is the smallest design that passes the gate. C adds a general abstraction over a problem that needs two profiles; D fails safety. Database impact: A none, B three additive columns, C as B, D new tables. B and C both keep validation in the service layer.
 
 ## 11. Testing strategy
 
-**Reuse:** registry, interpretation, reader deny-by-default, rule-engine duration, hysteresis, unit-binding and restart tests, and the real-Home-Assistant suite (`tests/integration`). **New:** (1) a generic profile is never hazard, never critical lane, never announced at start-up (invariant); (2) unknown numeric: threshold, hysteresis, duration, strict parsing (NaN, Inf, `1e999`, localized commas rejected), unit disappearance and change, dormant and resume; (3) unknown binary: raw `on`/`off` only, `unknown`/`unavailable` ignored; (4) smoke, gas and CO classes: confirmation required, fixed wording, no hazard behavior; (5) a built-in row added later does not reinterpret a stored generic rule (the `origin` guard); (6) authorization: unshared entity refused, revocation stops evaluation; (7) the same `Service` called by Discord and a Dashboard-shaped caller gives identical validation; (8) golden wording for the generic messages; (9) migration up on a v0.5.0 database and old-binary read; (10) restart and reconnect without duplicates. **Minimum before release:** (1), (2), (5), (6), (7), (9), plus one real-Home-Assistant run of a template numeric sensor through a unit change and an outage. Manual Discord QA should be limited to the confirmation wording.
+**Reuse:** registry, interpretation, reader deny-by-default, rule-engine duration, hysteresis, unit-binding and restart tests, and the real-Home-Assistant suite (`tests/integration`). **New:** (1) a generic profile is never hazard, never critical lane, never announced at start-up (invariant); (2) unknown numeric: threshold, hysteresis, duration, strict parsing (NaN, Inf, `1e999`, localized commas rejected), unit disappearance and change, dormant and resume; (3) unknown binary: raw `on`/`off` only, `unknown`/`unavailable` ignored; (4) smoke, gas and CO classes: confirmation required, fixed wording, no hazard behavior; (5) a built-in row added later does not reinterpret a stored generic rule (the `origin` guard); (6) authorization: unshared entity refused, revocation stops evaluation; (7) Discord commands and direct service tests give identical validation; (8) golden wording for the generic messages; (9) migration up on a v0.5.0 database and old-binary read; (10) restart and reconnect without duplicates. **Minimum before release:** (1), (2), (5), (6), (7), (9), plus one real-Home-Assistant run of a template numeric sensor through a unit change and an outage. Manual Discord QA should be limited to the confirmation wording.
 
 ## 12. Phased roadmap
 
@@ -158,15 +158,15 @@ Additive `ALTER TABLE ... ADD COLUMN` with defaults, **no table rebuild** and no
 | **3** | Categorical equals (only on demonstrated need) | new `kind`, table rebuild | defer until requested | high |
 | Parallel | Trusted classes by registry row | per class | each its own design | per class |
 
-**Release.** Phase 1 should **not** ride in v0.6.0, whose job is the Dashboard; ship the Dashboard on the existing service layer first, then Phase 1 as v0.6.x or v0.7.0. Dependencies: Phase 0, then Phase 1, then 2.
+**Release.** Phase 1 should **not** ride in v1.0.0, whose job is stabilization of the existing Discord-only product. Reevaluate it after the stable release. Dependencies: Phase 0, then Phase 1, then 2.
 
 ## 13. Architecture decision
 
-1. **Monitorable without Go changes?** Yes, generically, by explicit configuration. 2. **Safe generic capabilities:** numeric threshold, hysteresis, duration, exact-unit binding; raw binary change; neither conveys safety. 3. **Must stay hardcoded:** hazard status, polarity, trusted wording, start-up behavior, critical lane, the control allowlist. 4. **Keep the registry?** Yes, it is the only trust source. 5. **Can the current engine serve generic sensors?** Yes (capability bits, duration, hysteresis, dedupe); the tracker and eligibility need a profile path. 6. **Migration?** Recommended (three additive columns); avoidable only by accepting reinterpretation risk. 7. **Administrator configuration:** select, see raw facts, choose, confirm, save, server-validated. 8. **Dashboard:** same `notify.Service`; no rules in the UI layer. 9. **Metadata changes:** dormant or needs review, never reinterpreted. 10. **Smallest production-worthy MVP:** Phase 1, generic numeric threshold with unit binding.
+1. **Monitorable without Go changes?** Yes, generically, by explicit configuration. 2. **Safe generic capabilities:** numeric threshold, hysteresis, duration, exact-unit binding; raw binary change; neither conveys safety. 3. **Must stay hardcoded:** hazard status, polarity, trusted wording, start-up behavior, critical lane, the control allowlist. 4. **Keep the registry?** Yes, it is the only trust source. 5. **Can the current engine serve generic sensors?** Yes (capability bits, duration, hysteresis, dedupe); the tracker and eligibility need a profile path. 6. **Migration?** Recommended (three additive columns); avoidable only by accepting reinterpretation risk. 7. **Administrator configuration:** select, see raw facts, choose, confirm, save, server-validated through Discord. 8. **Service boundary:** commands call `notify.Service`; no rules live in the UI layer. 9. **Metadata changes:** dormant or needs review, never reinterpreted. 10. **Smallest production-worthy MVP:** Phase 1, generic numeric threshold with unit binding.
 
 ## 14. Open questions (need product approval)
 
-1. Ship Phase 1 after the Dashboard (recommended) or earlier? 2. Is a three-column migration acceptable, or should reinterpretation risk be accepted to avoid it? 3. May a numeric sensor with *no* unit be monitored (with an explicit "unitless" confirmation)? 4. Should the smoke, gas and CO friction list be fixed in code or documented only? 5. Is generic monitoring opt-in per installation (a setting), given its weaker guarantees? 6. Who may create generic rules: administrators only (recommended)? 7. Is categorical monitoring wanted at all? 8. Should `state_class` (not read today) discourage thresholds on cumulative meters?
+1. When, if ever, should Phase 1 follow the stable v1.0.0 release? 2. Is a three-column migration acceptable, or should reinterpretation risk be accepted to avoid it? 3. May a numeric sensor with *no* unit be monitored (with an explicit "unitless" confirmation)? 4. Should the smoke, gas and CO friction list be fixed in code or documented only? 5. Is generic monitoring opt-in per installation (a setting), given its weaker guarantees? 6. Who may create generic rules: administrators only (recommended)? 7. Is categorical monitoring wanted at all? 8. Should `state_class` (not read today) discourage thresholds on cumulative meters?
 
 ## 15. Exact code references
 

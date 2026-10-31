@@ -137,7 +137,7 @@ Third milestone: real-time sensor monitoring. Notifications are not part of it.
 
 ### Known limitations
 
-- Monitoring observes only: no notifications (v0.4.0), no rules (v0.5.0), no dashboard (v0.6.0).
+- Monitoring in this release observes only; notifications and rules arrived in later releases.
 - Only the eight sensor categories above are tracked; other sensors stay available through `/devices` and `/status`.
 - A change that happens and reverses while NeptHass is disconnected cannot be seen; Home Assistant does not replay events and NeptHass does not invent them.
 - Live state is in memory: after a restart `/sensors` is empty or stale until the first synchronization completes (seconds).
@@ -171,7 +171,7 @@ Second milestone: interactive setup.
 
 ### Known limitations
 
-- No sensor monitoring, Home Assistant WebSocket, notifications, rules or `/home` dashboard yet (planned for v0.3.0 to v0.6.0).
+- No sensor monitoring, Home Assistant WebSocket, notifications or rules yet; those capabilities arrived in later releases.
 - A single Discord guild is supported.
 - A setup session holds at most 100 selected entities, and entities whose ID is longer than 100 characters cannot be offered in the wizard's select menu.
 - Alias uniqueness is case-insensitive but not aware of visually confusable characters from different scripts.
@@ -201,9 +201,9 @@ First milestone: the foundation.
 
 ### Known limitations
 
-- No `/setup` wizard, `/sync`, sensor monitoring, notifications, rules or `/home` dashboard yet (planned for v0.2.0 to v0.6.0).
+- No `/setup` wizard, `/sync`, sensor monitoring, notifications or rules yet; those capabilities arrived in later releases.
 - A single Discord guild is supported.
-- `/devices` lists 10 entities per page via a `page` option; interactive pagination arrives with the dashboard.
+- `/devices` lists 10 entities per page via a `page` option.
 
 [Unreleased]: https://github.com/nepthass/nepthass/compare/v0.5.0...HEAD
 [0.5.0]: https://github.com/nepthass/nepthass/compare/v0.4.0...v0.5.0

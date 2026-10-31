@@ -13,7 +13,7 @@ Status: implemented and released in v0.3.0. This document records the decisions 
 
 ## Non-goals
 
-- No Discord notifications, alert delivery, cooldowns, rules, thresholds or dashboards.
+- No Discord notifications, alert delivery, cooldowns, rules or thresholds.
 - No `/home`, no new web or HTTP surface, no new datastore, no new environment variable.
 - No durable sensor history. Live state is held in memory only.
 - NeptHass never reconstructs events it did not see.

@@ -22,7 +22,7 @@ You often want your family or housemates to check a sensor or switch a light wit
 
 ## Project maturity
 
-NeptHass is **pre-1.0** and is developed milestone by milestone in a private repository; a public launch is planned for a later milestone. Each release is verified by automated tests, including a suite that runs against a real Home Assistant, and by manual testing on a Discord test server. Manual coverage is partial for v0.4.0; see [the known gaps](docs/development/smoke-tests.md#known-gaps).
+NeptHass is preparing for its first stable release. Its product scope is deliberately focused: a self-hosted Discord interface for selected Home Assistant entities, monitoring and notifications. Each release is verified by automated tests, including a suite that runs against a real Home Assistant, and by manual testing on a Discord test server. Manual coverage is partial for v0.4.0; see [the known gaps](docs/development/smoke-tests.md#known-gaps).
 
 **Notifications are best-effort, not an alarm system.** Delivery has a bounded staleness (10 minutes) and can occasionally duplicate. Queued alerts are kept in memory, so a crash or restart loses what was waiting. When NeptHass starts it cannot know when a condition began: a water leak that is already wet is announced once (as what Home Assistant reports, not as a new event) and other conditions are listed in one start-up summary. Do not rely on notifications for life-safety. Details and guarantees: [docs/design/notifications.md](docs/design/notifications.md).
 
@@ -33,7 +33,7 @@ NeptHass is **pre-1.0** and is developed milestone by milestone in a private rep
 | v0.3.0 | Home Assistant WebSocket, real-time sensor monitoring | Released |
 | v0.4.0 | Smart notifications and monitoring-down notices | Released |
 | v0.5.0 | Richer rules and safer start-up: durations, hysteresis, unit-safe thresholds, start-up alerting, audit of refused commands, garage door and opening sensors | Released |
-| v0.6.0 and later | See the [roadmap](docs/roadmap.md) | Planned |
+| v1.0.0 | Stable Discord-only product; release-readiness hardening and documentation | In preparation |
 
 Release history: [CHANGELOG.md](CHANGELOG.md).
 

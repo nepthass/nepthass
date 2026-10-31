@@ -383,12 +383,12 @@ The audit recommends avoiding any schema change, and none is justified by the ev
 
 **Explicitly deferred.** Options C and D. Hazard classes (`smoke`, `gas`, `carbon_monoxide`) need their own safety design first: wording per class, the alarming polarity verified against Home Assistant's contract, how a numeric hazard would be expressed, the critical-lane and start-up budget with several hazards, and real-Home-Assistant tests. **Suggested revisit trigger for C or D:** repeated, concrete requests for more than about ten additional classes across two releases, or a maintainer who cannot keep pace with rows.
 
-## 13. Potential v0.6.0 roadmap
+## 13. Stable-release follow-up
 
-- **No registry work is necessary for v0.6.0** (the interactive `/home` dashboard). The dashboard can consume `monitor.Specs()` and `Reader` as they are.
-- **Optional hygiene, if capacity allows and before any new class:** S1, S2 and S3 (together a small, behavior-preserving change with no migration and no new dependency).
-- **A product decision, not an architecture one:** S4, how `/status`, `/devices` and any dashboard tile present an entity that NeptHass does not monitor. A dashboard will make this visible, so decide it with the dashboard design.
-- **Not in v0.6.0:** a configurable catalog, inferred capabilities, and any hazard class.
+- **No additional registry feature is necessary for v1.0.0.** The stable release uses the existing typed registry and conservative semantics.
+- **Optional hygiene, only before any new class:** S1, S2 and S3 (together a small, behavior-preserving change with no migration and no new dependency). The implementation follow-up below records that these hardening steps were completed after this audit.
+- **A product decision, not an architecture one:** S4, how `/status` and `/devices` present an entity that NeptHass does not monitor. The implementation follow-up below records the neutral rendering decision.
+- **Not in v1.0.0:** a configurable catalog, inferred capabilities, and any hazard class.
 
 ## 14. Open questions
 

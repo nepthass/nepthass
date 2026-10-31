@@ -37,10 +37,19 @@ Not in v0.5.0: smoke, gas and carbon monoxide alerts (they need a deliberate saf
 - **Delivery reliability.** A persisted outbox would survive restarts but changes the delivery model; it is only worth doing with evidence that restart losses matter in practice.
 - **Per-rule alert channels, notification history, a configurable staleness bound.**
 
-## Later
+## v1.0.0: stable Discord-only release
 
-- **v0.6.0: interactive `/home` dashboard.**
-- **v1.0.0: stable release.** Hardening, an independent security review, complete documentation, and a public launch.
+The next release candidate consolidates the existing Discord and Home Assistant product without adding a new user interface or unrelated feature. Release work is limited to hardening, an independent security review, complete documentation, upgrade verification and the remaining manual Discord checks.
+
+The stable product boundary is:
+
+- Discord commands and interactive setup.
+- Home Assistant REST and WebSocket integration.
+- Explicit entity sharing, aliases, status and authorized light/switch control.
+- Sensor monitoring, notification rules and audit logging.
+- SQLite persistence and Docker deployment.
+
+The [v1.0.0 readiness plan](development/v1.0.0-release-readiness.md) records the acceptance gates and known blockers.
 
 ### Before a public launch
 
