@@ -101,7 +101,7 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 	admin := discord.NewNotificationAdmin(notifySvc, engine, notifier, mon.Tracker(), aliases, log)
 	bot, err := discord.New(cfg.Discord, commands.Deps{
 		Entities: service, Discovery: discovery, Monitoring: monitor.NewReader(mon, perms, aliases), Notifications: admin,
-		Audit: auditLog, HA: ha, DB: db, Version: version, Logger: log,
+		Audit: auditLog, Denials: audit.NewDenials(auditLog, log, time.Now), HA: ha, DB: db, Version: version, Logger: log,
 	}, setupService)
 	if err != nil {
 		return err

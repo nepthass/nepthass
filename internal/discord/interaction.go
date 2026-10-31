@@ -9,6 +9,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 
+	"github.com/nepthass/nepthass/internal/audit"
 	"github.com/nepthass/nepthass/internal/auth"
 	"github.com/nepthass/nepthass/internal/discord/commands"
 )
@@ -85,6 +86,51 @@ func (b *Bot) reject(api interactionAPI, i *discordgo.Interaction, cause error) 
 		return
 	}
 	b.say(api, i, "You are not authorized to use NeptHass.")
+	b.auditRefusal(i, cause)
+}
+
+// auditRefusal records a refused ADMINISTRATOR command from someone who is not
+// authorized at all (a stranger in this guild, or any user of another guild or a
+// direct message). It runs after the reply, never decides anything, and stores only
+// the command and subcommand names the registry itself defines: an unknown command
+// name, a non-administrator command and every other interaction type are not audited.
+func (b *Bot) auditRefusal(i *discordgo.Interaction, cause error) {
+	name, sub, ok := commandOf(i)
+	if !ok {
+		return
+	}
+	if min, known := b.reg.Level(name); !known || min < auth.LevelAdmin {
+		return
+	}
+	reason := audit.ReasonNotAllowed
+	if errors.Is(cause, auth.ErrWrongGuild) {
+		reason = audit.ReasonWrongGuild
+	}
+	b.denials.Record(context.Background(), audit.DenialAttempt{InteractionID: i.ID, ActorID: interactionUserID(i), Command: name, Action: sub, GuildID: i.GuildID, Reason: reason})
+}
+
+// commandOf extracts the command and subcommand names of an application command
+// interaction without ever panicking on a malformed one.
+func commandOf(i *discordgo.Interaction) (name, sub string, ok bool) {
+	if i == nil || i.Type != discordgo.InteractionApplicationCommand {
+		return "", "", false
+	}
+	var d discordgo.ApplicationCommandInteractionData
+	switch v := i.Data.(type) {
+	case discordgo.ApplicationCommandInteractionData:
+		d = v
+	case *discordgo.ApplicationCommandInteractionData:
+		if v == nil {
+			return "", "", false
+		}
+		d = *v
+	default:
+		return "", "", false
+	}
+	if len(d.Options) == 1 && d.Options[0] != nil && d.Options[0].Type == discordgo.ApplicationCommandOptionSubCommand {
+		sub = d.Options[0].Name
+	}
+	return d.Name, sub, true
 }
 
 func (b *Bot) runCommand(ctx context.Context, api interactionAPI, i *discordgo.Interaction, actor auth.Actor) {
@@ -103,7 +149,9 @@ func (b *Bot) runCommand(ctx context.Context, api interactionAPI, i *discordgo.I
 	}
 	runCtx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
-	reply := b.reg.Run(runCtx, newRequest(actor, i.GuildID, i.ApplicationCommandData()))
+	req := newRequest(actor, i.GuildID, i.ApplicationCommandData())
+	req.InteractionID = i.ID
+	reply := b.reg.Run(runCtx, req)
 
 	b.deliver(api, i, reply)
 }

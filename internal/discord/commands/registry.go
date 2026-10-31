@@ -23,6 +23,9 @@ type Request struct {
 	GuildID    string
 	Command    string
 	Subcommand string
+	// InteractionID identifies the Discord interaction (set by the bot); it lets the
+	// denial audit record a replayed interaction once.
+	InteractionID string
 	// Args holds option values by name. Integers are decimal strings.
 	Args map[string]string
 	// Focused is the option being typed during autocomplete ("" otherwise).
@@ -95,11 +98,13 @@ type Deps struct {
 	// /health shows no notification line (v0.3.0 behaviour).
 	Notifications Notifications
 	Audit         *audit.Log
-	HA            HomeAssistant
-	DB            Pinger
-	Gateway       func() Gateway
-	Version       string
-	Logger        *slog.Logger
+	// Denials audits refused administrator commands; nil records nothing.
+	Denials *audit.Denials
+	HA      HomeAssistant
+	DB      Pinger
+	Gateway func() Gateway
+	Version string
+	Logger  *slog.Logger
 }
 
 type (
@@ -147,6 +152,13 @@ func (r *Registry) Definitions() []*discordgo.ApplicationCommand {
 	return defs
 }
 
+// Level returns the minimum privilege level of a registered command; false for a
+// name the registry does not define.
+func (r *Registry) Level(name string) (auth.Level, bool) {
+	c, ok := r.cmds[name]
+	return c.min, ok
+}
+
 // Run executes a command after enforcing its minimum privilege level.
 func (r *Registry) Run(ctx context.Context, req Request) Reply {
 	c, ok := r.cmds[req.Command]
@@ -158,6 +170,11 @@ func (r *Registry) Run(ctx context.Context, req Request) Reply {
 		return Reply{Content: "This command contains an option that this version of NeptHass does not understand, so it was not run."}
 	}
 	if err := req.Actor.Require(c.min); err != nil {
+		// The refusal is decided; auditing it can neither grant access nor change the reply.
+		if c.min >= auth.LevelAdmin {
+			r.deps.Denials.Record(ctx, audit.DenialAttempt{InteractionID: req.InteractionID, ActorID: req.Actor.UserID, Command: req.Command,
+				Action: req.Subcommand, GuildID: req.GuildID, Reason: audit.ReasonNotAdmin})
+		}
 		return r.fail(req, err)
 	}
 	return c.run(ctx, req)
