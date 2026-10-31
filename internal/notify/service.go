@@ -146,6 +146,7 @@ var known = []error{
 	ErrChannelRejected, ErrTestFailed,
 	auth.ErrAdminRequired, auth.ErrNotAuthorized, ErrNotConfigured, ErrInvalidChannel, ErrInvalidEntity, ErrInvalidKind,
 	ErrInvalidThreshold, ErrInvalidCooldown, ErrNotShared, ErrNotMonitored, ErrIncompatible, ErrRuleLimit, ErrRuleExists, ErrRuleNotFound,
+	ErrInvalidDuration, ErrDurationNotAllowed, ErrInvalidClear, ErrClearNotAllowed, ErrHazardImmediate, ErrUnitUnsupported, ErrUnitBound,
 }
 
 func sanitized(err error) string {
@@ -238,6 +239,17 @@ func (s *Service) AddRule(ctx context.Context, actor auth.Actor, n NewRule) (Rul
 		if !compatible(n.Kind, sensor.Category) {
 			return ErrIncompatible
 		}
+		spec, _ := monitor.SpecFor(sensor.Category) // compatible() guarantees the row
+		if err := checkCapabilities(n, spec); err != nil {
+			return err
+		}
+		unit := ""
+		if n.Kind != KindState {
+			if !spec.SupportsUnit(sensor.Unit) {
+				return ErrUnitUnsupported
+			}
+			unit = sensor.Unit
+		}
 		count, err := t.store.CountRules(ctx)
 		if err != nil {
 			return err
@@ -246,7 +258,7 @@ func (s *Service) AddRule(ctx context.Context, actor auth.Actor, n NewRule) (Rul
 			return ErrRuleLimit
 		}
 		now := s.d.Now()
-		r := Rule{Entity: n.Entity, Kind: n.Kind, Threshold: n.Threshold, Cooldown: n.Cooldown, Enabled: true,
+		r := Rule{Entity: n.Entity, Kind: n.Kind, Threshold: n.Threshold, Cooldown: n.Cooldown, Duration: n.Duration, Clear: n.Clear, Unit: unit, Enabled: true,
 			CreatedBy: actor.UserID, CreatedAt: now, UpdatedBy: actor.UserID, UpdatedAt: now}
 		if r.ID, err = t.store.InsertRule(ctx, r); err != nil {
 			return err
@@ -325,6 +337,115 @@ func (s *Service) RemoveRule(ctx context.Context, actor auth.Actor, id int64) er
 	})
 }
 
+// ConfirmUnit binds a numeric rule that predates unit binding to the sensor's
+// CURRENT unit, on an administrator's say-so that its threshold is expressed in
+// that unit. It is the recovery path for a rule NeptHass could not bind by itself
+// (a class with several units, such as temperature). It refuses a rule that is
+// already bound (a unit is never rebound), a sensor that is not monitored, and a
+// unit that is missing or not supported for the sensor type.
+func (s *Service) ConfirmUnit(ctx context.Context, actor auth.Actor, id int64) (string, error) {
+	var bound string
+	err := s.mutate(ctx, actor, audit.Entry{Command: "notifications.rule.unit", Action: "confirm"}, func(t txn, e *audit.Entry) error {
+		r, ok, err := t.store.GetRule(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return ErrRuleNotFound
+		}
+		e.EntityID = string(r.Entity)
+		if r.Kind == KindState {
+			return ErrIncompatible
+		}
+		if r.Unit != "" {
+			return ErrUnitBound
+		}
+		sensor, monitored := s.d.Sensors.Get(r.Entity)
+		if !monitored {
+			return ErrNotMonitored
+		}
+		spec, found := monitor.SpecFor(sensor.Category)
+		if !found || !compatible(r.Kind, sensor.Category) {
+			return ErrIncompatible
+		}
+		if !spec.SupportsUnit(sensor.Unit) {
+			return ErrUnitUnsupported
+		}
+		changed, err := t.store.SetRuleUnit(ctx, id, sensor.Unit, actor.UserID, s.d.Now())
+		if err != nil {
+			return err
+		}
+		if !changed {
+			return ErrUnitBound
+		}
+		bound = sensor.Unit
+		e.Detail = fmt.Sprintf("rule=%d unit=%s", id, sensor.Unit)
+		return nil
+	})
+	return bound, err
+}
+
+// BindLegacyUnits is the one-time, audited binding of rules created before unit
+// binding. A rule is bound ONLY when the mapping is unambiguous: a numeric rule
+// with no unit, whose sensor is monitored and reporting a real value, in a class
+// with exactly one documented unit (humidity and battery: %), and whose current
+// unit is that unit. It never converts a value, never guesses between units
+// (temperature may be °C, °F or K, so an administrator must confirm it), and
+// leaves everything else untouched. Each binding is one transaction with its
+// audit entry, written by SystemActor, and a rule is bound at most once because
+// SetRuleUnit changes only an empty unit. It returns how many rules it bound.
+func (s *Service) BindLegacyUnits(ctx context.Context) (int, error) {
+	rules, err := s.d.Store.ListRules(ctx)
+	if err != nil {
+		return 0, err
+	}
+	bound := 0
+	for _, r := range rules {
+		if r.Kind == KindState || r.Unit != "" {
+			continue
+		}
+		sensor, monitored := s.d.Sensors.Get(r.Entity)
+		if !monitored || !reliable(sensor) || !compatible(r.Kind, sensor.Category) {
+			continue
+		}
+		spec, _ := monitor.SpecFor(sensor.Category)
+		unit, single := spec.SingleUnit()
+		if !single || sensor.Unit != unit {
+			continue
+		}
+		ok, err := s.bindInTx(ctx, r, unit)
+		if err != nil {
+			return bound, err
+		}
+		if ok {
+			bound++
+		}
+	}
+	return bound, nil
+}
+
+func (s *Service) bindInTx(ctx context.Context, r Rule, unit string) (bool, error) {
+	tx, err := s.d.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin unit binding: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := s.d.Now()
+	changed, err := s.d.Store.WithTx(tx).SetRuleUnit(ctx, r.ID, unit, SystemActor, now)
+	if err != nil || !changed {
+		return false, err
+	}
+	e := audit.Entry{Time: now, ActorID: SystemActor, Command: "notifications.rule.unit", EntityID: string(r.Entity), Action: "bind",
+		Outcome: audit.OutcomeSuccess, Detail: fmt.Sprintf("rule=%d unit=%s", r.ID, unit)}
+	if err := s.d.Audit.WithTx(tx).Record(ctx, e); err != nil {
+		return false, fmt.Errorf("the unit was not bound because its audit entry could not be written: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit unit binding: %w", err)
+	}
+	return true, nil
+}
+
 func validateRule(n NewRule) error {
 	if !n.Kind.Valid() {
 		return ErrInvalidKind
@@ -346,6 +467,48 @@ func validateRule(n NewRule) error {
 		if d := *n.Cooldown; d < 0 || d > MaxCooldown || d%time.Second != 0 {
 			return ErrInvalidCooldown
 		}
+	}
+	if n.Duration != 0 && (n.Duration < MinDuration || n.Duration > MaxDuration || n.Duration%time.Second != 0) {
+		return ErrInvalidDuration
+	}
+	if n.Clear != nil {
+		if n.Kind == KindState {
+			return ErrClearNotAllowed
+		}
+		v := *n.Clear
+		if math.IsNaN(v) || math.IsInf(v, 0) || math.Abs(v) > MaxThreshold {
+			return ErrInvalidClear
+		}
+		// The clear value is on the recovery side of the threshold: below it for an
+		// "above" rule, above it for a "below" rule. Equal is refused: the rule could
+		// never leave its alert state without crossing the trigger itself.
+		if (n.Kind == KindAbove && !(v < *n.Threshold)) || (n.Kind == KindBelow && !(v > *n.Threshold)) {
+			return ErrInvalidClear
+		}
+	}
+	return nil
+}
+
+// checkCapabilities refuses a duration or a clear value the sensor class does not
+// support. A hazard (the water leak) is immediate only: that is a product
+// decision, not a limitation, so it has its own message.
+func checkCapabilities(n NewRule, spec monitor.Spec) error {
+	if n.Duration > 0 || n.Clear != nil {
+		if spec.Hazard {
+			return ErrHazardImmediate
+		}
+	}
+	if n.Duration > 0 {
+		need := monitor.CapStateDuration
+		if n.Kind != KindState {
+			need = monitor.CapThresholdDuration
+		}
+		if !spec.Caps.Has(need) {
+			return ErrDurationNotAllowed
+		}
+	}
+	if n.Clear != nil && !spec.Caps.Has(monitor.CapHysteresis) {
+		return ErrClearNotAllowed
 	}
 	return nil
 }
@@ -374,6 +537,10 @@ func statusOf(r Rule, access entities.Access, sensor monitor.Sensor, monitored b
 		return StatusNotMonitored
 	case !compatible(r.Kind, sensor.Category):
 		return StatusIncompatible
+	case r.Kind != KindState && r.Unit == "":
+		return StatusUnitUnresolved
+	case r.Kind != KindState && sensor.Unit != r.Unit:
+		return StatusUnitChanged
 	}
 	return StatusActive
 }
@@ -384,6 +551,15 @@ func ruleDetail(r Rule) string {
 	fmt.Fprintf(&b, "rule=%d kind=%s", r.ID, r.Kind)
 	if r.Threshold != nil {
 		b.WriteString(" threshold=" + strconv.FormatFloat(*r.Threshold, 'g', -1, 64))
+	}
+	if r.Clear != nil {
+		b.WriteString(" clear=" + strconv.FormatFloat(*r.Clear, 'g', -1, 64))
+	}
+	if r.Duration > 0 {
+		b.WriteString(" for=" + r.Duration.String())
+	}
+	if r.Unit != "" {
+		b.WriteString(" unit=" + r.Unit) // only a registry-supported unit is ever bound
 	}
 	if r.Cooldown == nil {
 		b.WriteString(" cooldown=default")

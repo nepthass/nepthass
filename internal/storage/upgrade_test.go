@@ -24,6 +24,20 @@ func v030FS(t *testing.T) fs.FS {
 	return m
 }
 
+// v040FS is the schema a v0.4.0 build ships: migrations 0001 to 0003.
+func v040FS(t *testing.T) fs.FS {
+	t.Helper()
+	m := fstest.MapFS{}
+	for _, name := range []string{"0001_foundation.sql", "0002_interactive_setup.sql", "0003_notifications.sql"} {
+		b, err := fs.ReadFile(migrations.FS, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m[name] = &fstest.MapFile{Data: b}
+	}
+	return m
+}
+
 func TestMigrate_upgradesAV030Database_to0003_keepingData_survivesARestart_andARollbackBuildIsRefused(t *testing.T) {
 	ctx := context.Background()
 	db := memDB(t)
@@ -39,7 +53,7 @@ func TestMigrate_upgradesAV030Database_to0003_keepingData_survivesARestart_andAR
 	}
 
 	// The v0.4.0 build starts: migration 0003 is applied on top.
-	if err := Migrate(ctx, db, migrations.FS); err != nil {
+	if err := Migrate(ctx, db, v040FS(t)); err != nil {
 		t.Fatalf("upgrade: %v", err)
 	}
 	var applied, settings, rules, audits int
@@ -52,7 +66,7 @@ func TestMigrate_upgradesAV030Database_to0003_keepingData_survivesARestart_andAR
 	}
 
 	// A restart re-runs Migrate and changes nothing.
-	if err := Migrate(ctx, db, migrations.FS); err != nil {
+	if err := Migrate(ctx, db, v040FS(t)); err != nil {
 		t.Fatalf("restart: %v", err)
 	}
 	_ = db.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations").Scan(&applied)

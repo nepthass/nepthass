@@ -58,8 +58,8 @@ func TestMigration_upgradesAV030Database_keepingEverything_andStartingDisabled(t
 			t.Errorf("migration %d was altered by the upgrade", v)
 		}
 	}
-	if len(after) != len(before)+1 || after[3] == "" {
-		t.Errorf("exactly migration 3 must have been added: before=%d after=%d", len(before), len(after))
+	if len(after) != len(before)+2 || after[3] == "" || after[4] == "" {
+		t.Errorf("exactly migrations 3 and 4 must have been added: before=%d after=%d", len(before), len(after))
 	}
 	for table, want := range map[string]int{"entity_permissions": 1, "entity_aliases": 1, "command_audit_logs": 1, "notification_settings": 0, "notification_rules": 0} {
 		var n int
