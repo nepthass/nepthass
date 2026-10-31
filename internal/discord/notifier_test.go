@@ -206,7 +206,7 @@ func TestFormatMessage_everyKindWithoutEntityIDsAndWithTheRightCaveats(t *testin
 		"down": {notify.Message{Kind: notify.MsgMonitoringDown, DownSince: at, DownFor: 5 * time.Minute, Failure: monitor.FailureNetwork},
 			[]string{"down for 5 minutes", "paused until it recovers", "could not be reached"}, nil},
 		"recovered": {notify.Message{Kind: notify.MsgMonitoringRecovered, DownFor: 7 * time.Minute}, []string{"is back after 7 minutes"}, nil},
-		"digest": {notify.Message{Kind: notify.MsgDigest, MoreLines: 3, Lines: []notify.DigestLine{{Name: "Front door", Trigger: notify.KindState, Meaning: monitor.MeaningOpen, ChangedAt: at}}},
+		"digest": {notify.Message{Kind: notify.MsgDigest, MoreLines: 3, Lines: []notify.DigestLine{{Category: monitor.CategoryDoor, Name: "Front door", Trigger: notify.KindState, Meaning: monitor.MeaningOpen, ChangedAt: at}}},
 			[]string{"Current state", "**Front door**: is now open", "and 3 more", "what happened in between is not known"}, nil},
 	}
 	for name, tc := range cases {
@@ -288,7 +288,7 @@ func TestNotifier_hostileSensorNamesCannotMentionAnyone_inAlertsOrDigests(t *tes
 		if err := f.n.Send(bg, door(name)); err != nil {
 			t.Fatal(err)
 		}
-		digest := notify.Message{Kind: notify.MsgDigest, Lines: []notify.DigestLine{{Name: name, Trigger: notify.KindState, Meaning: monitor.MeaningOpen}}}
+		digest := notify.Message{Kind: notify.MsgDigest, Lines: []notify.DigestLine{{Category: monitor.CategoryDoor, Name: name, Trigger: notify.KindState, Meaning: monitor.MeaningOpen}}}
 		if err := f.n.Send(bg, digest); err != nil {
 			t.Fatal(err)
 		}

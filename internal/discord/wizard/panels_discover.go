@@ -88,11 +88,11 @@ func discoverLine(it setup.DiscoverItem) string {
 	if it.Selected {
 		box = "\u2611"
 	}
-	state := ui.DescribeValue(it.State, it.Unit, it.Reliable())
+	state := ui.DescribeReading(string(it.ID.Domain()), it.DeviceClass, it.State, it.Unit, it.Reliable())
 	if it.Gone {
 		state = ui.IconWarn + " no longer in Home Assistant"
 	}
-	line := fmt.Sprintf("%s %s **%s** `%s`\n\u2003%s \u00b7 %s %s", box, ui.ReliableIcon(it.Reliable() && !it.Gone), ui.Escape(displayName(it)), it.ID, state, accessIcon(it.Access), accessLabel(it.Access))
+	line := fmt.Sprintf("%s %s **%s** `%s`\n\u2003%s \u00b7 %s %s", box, ui.ReadingIcon(it.Reliable() && !it.Gone), ui.Escape(displayName(it)), it.ID, state, accessIcon(it.Access), accessLabel(it.Access))
 	if it.DeviceClass != "" {
 		line += " \u00b7 " + ui.Escape(it.DeviceClass)
 	}

@@ -383,7 +383,7 @@ func (r *Registry) notifyFail(req Request, err error) Reply {
 	case errors.Is(err, notify.ErrNotMonitored):
 		return Reply{Content: ui.IconWarn + " That sensor is not being monitored right now. Monitoring may still be starting (see /health), or it is not a supported sensor type."}
 	case errors.Is(err, notify.ErrIncompatible):
-		return Reply{Content: ui.IconFail + " That kind of rule does not fit this sensor: door, window, motion, leak and battery-low sensors take no threshold; temperature, humidity and battery sensors need `above` or `below`."}
+		return Reply{Content: ui.IconFail + " That kind of rule does not fit this sensor: " + typeList(monitor.CapState) + " sensors take no threshold; " + typeList(monitor.CapThreshold) + " sensors need `above` or `below`."}
 	case errors.Is(err, notify.ErrInvalidThreshold):
 		return Reply{Content: fmt.Sprintf("%s The threshold must be a finite number between -%d and %d, and only numeric sensors take one.", ui.IconFail, notify.MaxThreshold, notify.MaxThreshold)}
 	case errors.Is(err, notify.ErrInvalidCooldown):

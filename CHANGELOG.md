@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **Neutral sensor state rendering.** `/status`, `/devices`, `/control` and the `/setup` discovery list no longer show a green check mark for a reading, because "on" is not healthy (an open door, water detected). A real reading now carries an information mark, a supported sensor type shows its meaning from the registry (for example `open (on)`), every other entity shows its raw state with no interpretation, and unavailable or unknown readings keep the warning mark and "(not reporting)".
+- **Notification wording is owned by the sensor registry.** The alert and duration wording of each sensor type now lives in its registry row instead of a shared meaning, so a new type can never inherit another type's text. The wording of every existing type is unchanged and is pinned by regression tests.
+
+### Fixed
+
+- **Type lists follow the registry.** Two user-facing lists of supported sensor types omitted garage door and opening. They are now generated from the registry, so a future type cannot be left out.
+
 ## [0.5.0] - 2026-10-31
 
 Fifth milestone: richer rules and safer start-up. Verified by 474 automated tests, 48 tests against a real Home Assistant and the mandatory real-Discord smoke checks; see the [release readiness report](docs/development/v0.5.0-release-readiness.md).
