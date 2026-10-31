@@ -19,6 +19,9 @@ const (
 	MsgMonitoringRecovered
 	// MsgDigest: the CURRENT state of rules whose alerts could not be delivered.
 	MsgDigest
+	// MsgStartup: sensors that were already in an alert state when NeptHass started
+	// (and hazards beyond the start-up budget), as Home Assistant reports them.
+	MsgStartup
 )
 
 // Lane is a delivery lane.
@@ -69,6 +72,12 @@ type Message struct {
 	// it held for AT LEAST Duration as far as NeptHass knows.
 	Duration    time.Duration
 	HeldAtLeast bool
+	// Initial marks an alert raised because NeptHass found the condition already
+	// present when it started, not because it saw it begin. ReportedAt is when Home
+	// Assistant last updated the state: a sleeping device may be reporting an old
+	// state, and the message says so.
+	Initial    bool
+	ReportedAt time.Time
 
 	// Lines and MoreLines describe a digest: the current state of up to ten
 	// still-violating rules, and how many more there were.
@@ -103,7 +112,17 @@ type DigestLine struct {
 
 // Lane returns the lane a message travels in.
 func (m Message) Lane() Lane {
-	if m.Kind == MsgAlert && !m.Category.Hazard() {
+	switch m.Kind {
+	case MsgAlert:
+		if !m.Category.Hazard() {
+			return LaneNormal
+		}
+	case MsgStartup:
+		for _, l := range m.Lines {
+			if l.Category.Hazard() {
+				return LaneCritical
+			}
+		}
 		return LaneNormal
 	}
 	return LaneCritical
@@ -121,7 +140,7 @@ func (m Message) priority() int {
 		return 1
 	case MsgMonitoringDown:
 		return 2
-	case MsgDigest:
+	case MsgDigest, MsgStartup:
 		return 1
 	}
 	return 0

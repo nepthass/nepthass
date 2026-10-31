@@ -42,6 +42,16 @@ func FormatMessage(m notify.Message) string {
 			fmt.Fprintf(&b, "\n- and %d more", m.MoreLines)
 		}
 		s = b.String()
+	case notify.MsgStartup:
+		var b strings.Builder
+		fmt.Fprintf(&b, "%s NeptHass started and found these sensors already in an alert state, as Home Assistant reports them. NeptHass cannot tell when they changed, and a device that sleeps may be showing its last known state:", ui.IconWarn)
+		for _, l := range m.Lines {
+			fmt.Fprintf(&b, "\n- **%s**: %s", name(l.Name), stateClause(l.Trigger, l.Meaning, l.Value, l.HasValue, l.Unit, l.Threshold))
+		}
+		if m.MoreLines > 0 {
+			fmt.Fprintf(&b, "\n- and %d more", m.MoreLines)
+		}
+		s = b.String()
 	default:
 		s = "NeptHass notification."
 	}
@@ -50,11 +60,29 @@ func FormatMessage(m notify.Message) string {
 
 func formatAlert(m notify.Message) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s **%s** %s", ui.IconWarn, name(m.Name), stateClause(m.Trigger, m.Meaning, m.Value, m.HasValue, m.Unit, m.Threshold))
-	if !m.ObservedAt.IsZero() {
-		fmt.Fprintf(&b, " at %s", ui.ClockTime(m.ObservedAt))
+	switch {
+	case m.Initial:
+		// Found already present when NeptHass started: say what Home Assistant reports and what NeptHass
+		// does not know, so it is never mistaken for a new event.
+		fmt.Fprintf(&b, "%s **%s** %s, according to Home Assistant.", ui.IconWarn, name(m.Name), stateClause(m.Trigger, m.Meaning, m.Value, m.HasValue, m.Unit, m.Threshold))
+		b.WriteString("\nNeptHass found it like this when it started, so this is not a new event and NeptHass cannot tell when it began.")
+		if !m.ReportedAt.IsZero() {
+			fmt.Fprintf(&b, " Home Assistant last updated it at %s; a device that sleeps may be reporting an old state.", ui.ClockTime(m.ReportedAt))
+		}
+		b.WriteString(" Please check it.")
+	case m.Duration > 0:
+		fmt.Fprintf(&b, "%s **%s** %s", ui.IconWarn, name(m.Name), heldClause(m))
+		if !m.ObservedAt.IsZero() {
+			fmt.Fprintf(&b, " (as of %s)", ui.ClockTime(m.ObservedAt))
+		}
+		b.WriteString(".")
+	default:
+		fmt.Fprintf(&b, "%s **%s** %s", ui.IconWarn, name(m.Name), stateClause(m.Trigger, m.Meaning, m.Value, m.HasValue, m.Unit, m.Threshold))
+		if !m.ObservedAt.IsZero() {
+			fmt.Fprintf(&b, " at %s", ui.ClockTime(m.ObservedAt))
+		}
+		b.WriteString(".")
 	}
-	b.WriteString(".")
 	if m.Late {
 		b.WriteString("\nDetected after NeptHass reconnected to Home Assistant, so it may have happened earlier.")
 	}
@@ -68,6 +96,55 @@ func formatAlert(m notify.Message) string {
 		fmt.Fprintf(&b, "\n(%d more alert(s) for this rule were suppressed by its cooldown.)", m.Muted)
 	}
 	return b.String()
+}
+
+// heldClause words a duration alert: how long the condition has held. When NeptHass
+// did not see it begin (a restart, a reconnect, an outage), the real time may be
+// longer, so it says "at least".
+func heldClause(m notify.Message) string {
+	d := durationText(m.Duration)
+	if m.HeldAtLeast {
+		d = "at least " + d
+	}
+	switch m.Trigger {
+	case notify.KindAbove:
+		return "has been above " + num(m.Threshold, m.Unit) + " for " + d + now(m.Value, m.HasValue, m.Unit)
+	case notify.KindBelow:
+		return "has been below " + num(m.Threshold, m.Unit) + " for " + d + now(m.Value, m.HasValue, m.Unit)
+	}
+	switch m.Meaning {
+	case monitor.MeaningOpen:
+		return "has been open for " + d
+	case monitor.MeaningDetected:
+		return "has been detecting motion for " + d
+	case monitor.MeaningLow:
+		return "has reported a low battery for " + d
+	case monitor.MeaningWet:
+		return "has been wet for " + d
+	}
+	return "has been in its alert state for " + d
+}
+
+// durationText writes a duration in words: "10 minutes", "1 hour 30 minutes".
+func durationText(d time.Duration) string {
+	d = d.Round(time.Second)
+	h, m, sec := int(d/time.Hour), int(d%time.Hour/time.Minute), int(d%time.Minute/time.Second)
+	var parts []string
+	unit := func(n int, one, many string) {
+		switch {
+		case n == 1:
+			parts = append(parts, "1 "+one)
+		case n > 1:
+			parts = append(parts, strconv.Itoa(n)+" "+many)
+		}
+	}
+	unit(h, "hour", "hours")
+	unit(m, "minute", "minutes")
+	unit(sec, "second", "seconds")
+	if len(parts) == 0 {
+		return "0 seconds"
+	}
+	return strings.Join(parts, " ")
 }
 
 func stateClause(kind notify.Kind, meaning monitor.Meaning, value float64, hasValue bool, unit string, threshold *float64) string {

@@ -41,6 +41,10 @@ type EngineConfig struct {
 	Rand              func(n int64) int64
 	BreakerThreshold  int           // consecutive permanent failures that open the breaker (3)
 	BreakerProbe      time.Duration // probe interval while open (60s)
+	// Initial-state alerting (see initialstate.go).
+	StartupWindow       time.Duration // how long after the first sighting baseline conditions are collected into one summary (2m)
+	StartupHazardBudget int           // individual hazard alerts per start before the rest are folded into one message (3)
+	SummaryMinInterval  time.Duration // minimum spacing of start-up summaries, persisted across restarts (10m)
 }
 
 func (c *EngineConfig) withDefaults() {
@@ -65,6 +69,9 @@ func (c *EngineConfig) withDefaults() {
 	d(&c.BackoffInitial, time.Second)
 	d(&c.BackoffMax, 30*time.Second)
 	d(&c.BreakerProbe, time.Minute)
+	d(&c.StartupWindow, 2*time.Minute)
+	d(&c.SummaryMinInterval, 10*time.Minute)
+	n(&c.StartupHazardBudget, 3)
 	n(&c.CriticalCap, 32)
 	n(&c.NormalCap, 64)
 	n(&c.DigestMaxLines, 10)
@@ -150,6 +157,7 @@ type Engine struct {
 	monitoringOK atomic.Bool
 	reseedDur    atomic.Bool
 	pendingEps   atomic.Int64
+	startup      startupState // evaluator goroutine only
 	bindWake     chan struct{}
 
 	// reloadMu serializes Reload so the stored state is always the latest read;
@@ -286,7 +294,7 @@ func (e *Engine) evaluate(ctx context.Context) {
 	// pending right now is not mistaken for a state that already existed.
 	slots, order, overflowed := e.mb.drain()
 	if e.reseed.Swap(false) {
-		e.reconcileStates(rs, slots)
+		e.reconcileStates(ctx, rs, slots)
 	}
 	if e.reseedDur.Swap(false) {
 		e.reseedEpisodes(rs)
@@ -309,6 +317,7 @@ func (e *Engine) evaluate(ctx context.Context) {
 		e.evaluateSlot(ctx, rs, id, slots[id])
 	}
 	e.fireDue(ctx, rs)
+	e.flushStartup(ctx)
 	e.maybeDigest(ctx, rs)
 	e.noteBacklog()
 	e.noteEpisodes()
@@ -317,7 +326,7 @@ func (e *Engine) evaluate(ctx context.Context) {
 // reconcileStates drops the state of rules that disappeared and seeds new ones
 // (and ones whose unit was just bound) from the current sensor, silently: enabling
 // a rule never alerts for a state that already existed.
-func (e *Engine) reconcileStates(rs *ruleSet, pending map[entities.ID]slot) {
+func (e *Engine) reconcileStates(ctx context.Context, rs *ruleSet, pending map[entities.ID]slot) {
 	for id := range e.states {
 		if _, ok := rs.byID[id]; !ok {
 			delete(e.states, id)
@@ -331,37 +340,38 @@ func (e *Engine) reconcileStates(rs *ruleSet, pending map[entities.ID]slot) {
 		st := &ruleState{armed: true, unit: r.Unit}
 		e.states[id] = st
 		s, monitored := e.d.Sensors.Get(r.Entity)
-		if sl, waiting := pending[r.Entity]; waiting && r.stateful() && len(sl.trail) > 0 {
-			// Changes for this entity are waiting: seed from the state before the first of
-			// them, so evaluating them next sees the same transitions a running rule would.
-			first := sl.trail[0]
-			if sl.trailLost || !first.HadPrev {
-				continue // no known "before": the first reliable reading becomes the baseline
+		if sl, waiting := pending[r.Entity]; waiting {
+			switch {
+			case sl.reset || sl.removed:
+				// A first observation or a removal is waiting: it is baselined when the slot is
+				// evaluated next. Seeding from the tracker too would handle it twice.
+				continue
+			case !r.stateful():
+				if _, latched := sl.latchFor(r.ID); latched {
+					// A qualifying transition for this very rule is waiting: an event the
+					// evaluator processes next, not a condition that already existed.
+					st.baselined = true
+					continue
+				}
+			case len(sl.trail) > 0:
+				// Changes for this entity are waiting: seed from the state before the first of
+				// them, so evaluating them next sees the same transitions a running rule would.
+				first := sl.trail[0]
+				if sl.trailLost || !first.HadPrev {
+					continue // no known "before": the first reliable reading becomes the baseline
+				}
+				s, monitored = first.Prev, true
 			}
-			s, monitored = first.Prev, true
 		}
 		if !monitored || !usable(r, s) || !reliableFor(r, s) {
 			continue
 		}
 		st.baselined = true
 		if violates(r, s) {
-			e.baselineViolating(r, st, now)
+			e.initialState(&slotEnv{e: e, ctx: ctx, id: r.Entity, now: now, reload: true}, r, st, s, now)
 		}
 	}
 	e.noteEpisodes()
-}
-
-// baselineViolating handles a rule whose sensor NeptHass first sees already
-// violating: no event happened, so nothing alerts here. A duration rule starts
-// counting from now (never from an earlier time it cannot prove); a rule with a
-// clear value must see the sensor clear before it can fire.
-func (e *Engine) baselineViolating(r cachedRule, st *ruleState, at time.Time) {
-	switch {
-	case r.Duration > 0:
-		e.startEpisode(st, at, r.Duration, false)
-	case r.HasClear:
-		st.armed = false
-	}
 }
 
 func (e *Engine) startEpisode(st *ruleState, at time.Time, d time.Duration, exact bool) {
@@ -416,6 +426,10 @@ type slotEnv struct {
 	accessErr bool
 	aliases   map[entities.ID]string
 	loaded    bool
+	// reload is true when the evaluation comes from a rule being created or re-bound
+	// rather than from a change at start-up: such a baseline is never listed in the
+	// "already so when NeptHass started" summary.
+	reload bool
 }
 
 func (v *slotEnv) load() {
@@ -497,6 +511,9 @@ func (e *Engine) maybeRequestBind(r cachedRule, s monitor.Sensor) {
 // A stateful rule (a duration or a clear value) replays the ordered trail instead.
 func (e *Engine) evaluateSlot(ctx context.Context, rs *ruleSet, id entities.ID, s slot) {
 	v := &slotEnv{e: e, ctx: ctx, id: id, now: e.clock.Now()}
+	if e.startup.firstSight.IsZero() {
+		e.startup.firstSight = v.now // the start-up window opens at the first sighting
+	}
 	for _, r := range rs.byEntity[id] {
 		st := e.states[r.ID]
 		if st == nil {
@@ -525,11 +542,18 @@ func (e *Engine) evaluateSlot(ctx context.Context, rs *ruleSet, id entities.ID, 
 			e.replay(v, r, st, s)
 			continue
 		}
+		first := reliableFor(r, cur) && !st.baselined
 		if reliableFor(r, cur) {
 			st.baselined = true
 		}
 		l, latched := s.latchFor(r.ID)
-		if !latched || !v.permitted(r.ID) {
+		if !latched {
+			if first && violates(r, cur) {
+				e.initialState(v, r, st, cur, v.now) // seen already violating: no event happened
+			}
+			continue
+		}
+		if !v.permitted(r.ID) {
 			continue
 		}
 		e.release(v, r, st, cur.Category, func(muted int) Message {
@@ -569,7 +593,7 @@ func (e *Engine) observe(v *slotEnv, r cachedRule, st *ruleState, c monitor.Chan
 			st.armed = true
 		}
 	case first:
-		e.baselineViolating(r, st, c.At)
+		e.initialState(v, r, st, cur, c.At)
 	case r.Duration > 0:
 		if st.ep == nil && st.armed {
 			q, _ := enters(r, c)
@@ -868,6 +892,12 @@ func (e *Engine) delivered(it item) {
 		}
 	case MsgDigest:
 		e.digestInFlight.Store(false)
+	case MsgAlert:
+		if it.msg.Category.Hazard() {
+			e.putMark(it.msg.RuleID, it.msg.ChangedAt)
+		}
+	case MsgStartup:
+		e.startupDelivered(it.msg)
 	}
 	e.noteBacklog()
 	e.kickEvaluator()
@@ -927,8 +957,12 @@ type Health struct {
 	// episodes since start that began, fired, or ended without firing.
 	PendingEpisodes                                   int
 	EpisodesStarted, EpisodesFired, EpisodesCancelled uint64
-	Digests, Abandoned                                uint64
-	PendingAtShutdown                                 int64
+	// Initial-state alerting: hazard alerts raised at start-up, hazards suppressed
+	// because the same episode was already delivered, sensors listed in the start-up
+	// summary, summaries sent and summaries suppressed by the persisted window.
+	InitialAlerts, MarkSuppressed, StartupListed, StartupSummaries, SummarySuppressed uint64
+	Digests, Abandoned                                                                uint64
+	PendingAtShutdown                                                                 int64
 	// ConfigStale is true while the saved configuration is NOT the running one
 	// (a reload failed). The engine keeps the previous configuration and retries.
 	ConfigStale bool
@@ -953,6 +987,8 @@ func (e *Engine) Health() Health {
 		DroppedShutdown: e.m.droppedShutdown.Load(), DroppedCancelled: e.m.droppedCancelled.Load(),
 		SuppressedCooldown: e.m.suppressedCooldown.Load(), SuppressedUnshared: e.m.suppressedUnshared.Load(),
 		Digests: e.m.digests.Load(), Abandoned: e.m.abandoned.Load(), PendingAtShutdown: e.atShutdown.Load()}
+	h.InitialAlerts, h.MarkSuppressed, h.StartupListed = e.m.initialAlerts.Load(), e.m.markSuppressed.Load(), e.m.startupListed.Load()
+	h.StartupSummaries, h.SummarySuppressed = e.m.startupSummaries.Load(), e.m.summarySuppressed.Load()
 	h.PendingEpisodes = int(e.pendingEps.Load())
 	h.EpisodesStarted, h.EpisodesFired, h.EpisodesCancelled = e.m.episodesStarted.Load(), e.m.episodesFired.Load(), e.m.episodesCancelled.Load()
 	h.ConfigStale = e.reloadFailed.Load()
