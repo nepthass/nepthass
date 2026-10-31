@@ -254,3 +254,114 @@ func TestRules_openingsAlreadyOpenAtStartAreListedInOneSummary(t *testing.T) {
 		t.Fatalf("only the summary and the barrier: %+v", all)
 	}
 }
+
+func (r *nrig) ruleStatus(t *testing.T, id int64) notify.RuleStatus {
+	t.Helper()
+	views, err := r.svc.Rules(context.Background(), adminActor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range views {
+		if v.ID == id {
+			return v.Status
+		}
+	}
+	t.Fatalf("rule %d is not listed", id)
+	return ""
+}
+
+// A real unit change: the instance is switched to US customary units, so Home Assistant itself
+// reports the (still template-defined, Celsius) sensor in Fahrenheit. A threshold written in
+// Celsius must never be compared with 95, and the rule must resume when the unit returns.
+func TestRules_aRealUnitChangeMakesABoundRuleDormant_andItResumesWhenTheUnitReturns(t *testing.T) {
+	resetFor(t) // its cleanup also puts the instance back on metric units
+	r := startRig(t, rigOpts{configure: true})
+	rule := r.rule(t, temperature, notify.KindAbove, f64(30), 0)
+	if rule.Unit != "°C" {
+		t.Fatalf("the rule is bound to the unit the sensor reported when it was created: %q", rule.Unit)
+	}
+	r.rule(t, door, notify.KindState, nil, 0) // a barrier: its alert proves the evaluator got past the temperature
+
+	if err := wsCommand(context.Background(), map[string]any{"type": "config/core/update", "unit_system": "us_customary"}); err != nil {
+		t.Fatalf("switch to US customary: %v", err)
+	}
+	setTemperature(t, 35) // 35 °C, which Home Assistant now reports as 95 °F
+	until(t, "Home Assistant to report the temperature in °F", func() bool {
+		s, ok := r.mon.Tracker().Get(temperature)
+		return ok && s.Unit == "°F" && s.Interpretation().HasValue && s.Interpretation().Value > 90
+	})
+	if got := r.ruleStatus(t, rule.ID); got != notify.StatusUnitChanged {
+		t.Fatalf("the rule must say its sensor changed unit: %q", got)
+	}
+	scenario(t, "door_opened")
+	if got := r.snd.wait(t, 1); got[0].Category != monitor.CategoryDoor || len(r.snd.all()) != 1 {
+		t.Fatalf("95 °F must never be compared with a threshold of 30 °C: %+v", r.snd.all())
+	}
+
+	if err := wsCommand(context.Background(), map[string]any{"type": "config/core/update", "unit_system": "metric"}); err != nil {
+		t.Fatalf("switch back to metric: %v", err)
+	}
+	setTemperature(t, 20) // a fresh reading in °C, below the threshold
+	r.waitTemperature(t, 20)
+	until(t, "the rule to resume", func() bool { return r.ruleStatus(t, rule.ID) == notify.StatusActive })
+	setTemperature(t, 36)
+	r.waitTemperature(t, 36)
+	got := r.snd.wait(t, 2)
+	if m := got[1]; m.Category != monitor.CategoryTemperature || m.Unit != "°C" || !m.HasValue || m.Value != 36 {
+		t.Fatalf("after the unit returned the rule evaluates again, in °C: %+v", m)
+	}
+}
+
+// A real outage (the WebSocket connection is cut) while a duration is pending. NeptHass cannot prove
+// the door stayed open while it could not look, so nothing fires during the outage, the count starts
+// again when monitoring is back, and the alert says "at least".
+func TestRules_aRealOutageNeverFiresAPendingDuration_andTheCountRestartsAfterRecovery(t *testing.T) {
+	resetFor(t)
+	clk := newItClock()
+	proxy := newTCPProxy(t, target.url)
+	r := startRig(t, rigOpts{configure: true, monURL: proxy.URL(), clock: clk, mod: func(c *notify.EngineConfig) {
+		c.HealthTick = 10 * time.Second
+		longTTL(c)
+	}})
+	clk.await(t, 1)
+	clk.advance(10 * time.Second) // the first tick that sees a healthy monitor
+	clk.await(t, 1)
+	r.ruleV2(t, notify.NewRule{Entity: door, Kind: notify.KindState, Duration: 10 * time.Minute})
+	r.rule(t, motion, notify.KindState, nil, 0) // barriers: their alerts are ordered after anything the evaluator fired earlier
+	r.rule(t, window, notify.KindState, nil, 0)
+	scenario(t, "door_opened")
+	until(t, "the count to start", func() bool { return r.eng.Health().PendingEpisodes == 1 })
+	clk.await(t, 2) // the health watcher's tick and the evaluator's due timer
+
+	proxy.SetDown(true)
+	waitMonitor(t, r.mon, func(s monitor.Status) bool { return s.State == monitor.StateReconnecting })
+	clk.advance(10 * time.Second) // one tick that samples an unhealthy monitor
+	clk.await(t, 2)
+	clk.advance(12 * time.Minute) // far past the ten minutes the door has been open
+	if down := r.snd.wait(t, 1)[0]; down.Kind != notify.MsgMonitoringDown {
+		t.Fatalf("the outage is announced once monitoring has been down five minutes: %+v", down)
+	}
+
+	proxy.SetDown(false)
+	waitMonitor(t, r.mon, func(s monitor.Status) bool { return healthy(s) && s.Reconnects >= 1 })
+	clk.await(t, 1)
+	clk.advance(10 * time.Second) // the tick that sees monitoring is back and restarts the count
+	r.snd.wait(t, 2)
+	scenario(t, "motion_detected")
+	got := r.snd.wait(t, 3)
+	if got[1].Kind != notify.MsgMonitoringRecovered || got[2].Category != monitor.CategoryMotion || len(r.snd.all()) != 3 {
+		t.Fatalf("down, recovered, then only the barrier: no duration alert fired during or right after the outage: %+v", r.snd.all())
+	}
+
+	clk.await(t, 2)
+	clk.advance(9*time.Minute + 59*time.Second)
+	scenario(t, "window_opened")
+	if got = r.snd.wait(t, 4); got[3].Category != monitor.CategoryWindow || len(r.snd.all()) != 4 {
+		t.Fatalf("a second before the restarted duration only the barrier may have alerted: %+v", r.snd.all())
+	}
+	clk.advance(time.Second)
+	got = r.snd.wait(t, 5)
+	if m := got[4]; m.Category != monitor.CategoryDoor || m.Duration != 10*time.Minute || !m.HeldAtLeast || m.Kind != notify.MsgAlert {
+		t.Fatalf("the restarted count fires once and says \"at least\": %+v", m)
+	}
+}
