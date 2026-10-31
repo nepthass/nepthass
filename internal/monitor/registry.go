@@ -48,6 +48,11 @@ type Spec struct {
 	// message ("Door sensor"); Phrase words a state rule ("when it opens").
 	Label, Noun, Phrase string
 
+	// Alert and Held word a binary class's alert ("is now open") and its duration alert
+	// ("has been open for"). They belong to the class, never to a shared meaning, so a new
+	// row cannot inherit another class's wording.
+	Alert, Held string
+
 	Value ValueKind
 
 	// Binary classes: AlertState is the raw state that means "alert"; On and Off
@@ -130,19 +135,19 @@ var registry = []Spec{
 	{Category: CategoryBattery, Domain: DomainSensor, DeviceClass: "battery", Label: "Battery", Noun: "Battery sensor",
 		Value: ValueNumeric, Range: percent, Units: []string{"%"}, Cooldown: 6 * time.Hour, Caps: numericRuleCaps},
 	{Category: CategoryBatteryLow, Domain: DomainBinarySensor, DeviceClass: "battery", Label: "Battery low", Noun: "Battery sensor",
-		Phrase: "when its battery is low", Value: ValueBinary, AlertState: "on", On: MeaningLow, Off: MeaningNormal, Cooldown: 6 * time.Hour, Caps: stateRuleCaps},
+		Phrase: "when its battery is low", Alert: "reports a low battery", Held: "has reported a low battery for", Value: ValueBinary, AlertState: "on", On: MeaningLow, Off: MeaningNormal, Cooldown: 6 * time.Hour, Caps: stateRuleCaps},
 	{Category: CategoryMotion, Domain: DomainBinarySensor, DeviceClass: "motion", Label: "Motion", Noun: "Motion sensor",
-		Phrase: "when motion is detected", Value: ValueBinary, AlertState: "on", On: MeaningDetected, Off: MeaningClear, Cooldown: 5 * time.Minute, Caps: stateRuleCaps},
+		Phrase: "when motion is detected", Alert: "detected motion", Held: "has been detecting motion for", Value: ValueBinary, AlertState: "on", On: MeaningDetected, Off: MeaningClear, Cooldown: 5 * time.Minute, Caps: stateRuleCaps},
 	{Category: CategoryDoor, Domain: DomainBinarySensor, DeviceClass: "door", Label: "Door", Noun: "Door sensor",
-		Phrase: "when it opens", Value: ValueBinary, AlertState: "on", On: MeaningOpen, Off: MeaningClosed, Cooldown: time.Minute, Caps: stateRuleCaps},
+		Phrase: "when it opens", Alert: "is now open", Held: "has been open for", Value: ValueBinary, AlertState: "on", On: MeaningOpen, Off: MeaningClosed, Cooldown: time.Minute, Caps: stateRuleCaps},
 	{Category: CategoryWindow, Domain: DomainBinarySensor, DeviceClass: "window", Label: "Window", Noun: "Window sensor",
-		Phrase: "when it opens", Value: ValueBinary, AlertState: "on", On: MeaningOpen, Off: MeaningClosed, Cooldown: time.Minute, Caps: stateRuleCaps},
+		Phrase: "when it opens", Alert: "is now open", Held: "has been open for", Value: ValueBinary, AlertState: "on", On: MeaningOpen, Off: MeaningClosed, Cooldown: time.Minute, Caps: stateRuleCaps},
 	{Category: CategoryGarageDoor, Domain: DomainBinarySensor, DeviceClass: "garage_door", Label: "Garage door", Noun: "Garage door sensor",
-		Phrase: "when it opens", Value: ValueBinary, AlertState: "on", On: MeaningOpen, Off: MeaningClosed, Cooldown: time.Minute, Caps: stateRuleCaps},
+		Phrase: "when it opens", Alert: "is now open", Held: "has been open for", Value: ValueBinary, AlertState: "on", On: MeaningOpen, Off: MeaningClosed, Cooldown: time.Minute, Caps: stateRuleCaps},
 	{Category: CategoryOpening, Domain: DomainBinarySensor, DeviceClass: "opening", Label: "Opening", Noun: "Opening sensor",
-		Phrase: "when it opens", Value: ValueBinary, AlertState: "on", On: MeaningOpen, Off: MeaningClosed, Cooldown: time.Minute, Caps: stateRuleCaps},
+		Phrase: "when it opens", Alert: "is now open", Held: "has been open for", Value: ValueBinary, AlertState: "on", On: MeaningOpen, Off: MeaningClosed, Cooldown: time.Minute, Caps: stateRuleCaps},
 	{Category: CategoryLeak, Domain: DomainBinarySensor, DeviceClass: "moisture", Label: "Water leak", Noun: "Leak sensor",
-		Phrase: "when it gets wet", Value: ValueBinary, AlertState: "on", On: MeaningWet, Off: MeaningDry, Cooldown: 15 * time.Minute, Hazard: true, Caps: hazardRuleCaps},
+		Phrase: "when it gets wet", Alert: "is wet (water detected)", Held: "has been wet for", Value: ValueBinary, AlertState: "on", On: MeaningWet, Off: MeaningDry, Cooldown: 15 * time.Minute, Hazard: true, Caps: hazardRuleCaps},
 }
 
 type classKey struct{ domain, deviceClass string }

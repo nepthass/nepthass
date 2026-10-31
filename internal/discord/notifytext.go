@@ -33,7 +33,7 @@ func FormatMessage(m notify.Message) string {
 		var b strings.Builder
 		fmt.Fprintf(&b, "%s Some alerts could not be delivered earlier. **Current state** of the affected sensors (what happened in between is not known):", ui.IconWarn)
 		for _, l := range m.Lines {
-			fmt.Fprintf(&b, "\n- **%s**: %s", name(l.Name), stateClause(l.Trigger, l.Meaning, l.Value, l.HasValue, l.Unit, l.Threshold))
+			fmt.Fprintf(&b, "\n- **%s**: %s", name(l.Name), stateClause(l.Category, l.Trigger, l.Meaning, l.Value, l.HasValue, l.Unit, l.Threshold))
 			if !l.ChangedAt.IsZero() {
 				fmt.Fprintf(&b, " (since %s)", ui.ClockTime(l.ChangedAt))
 			}
@@ -46,7 +46,7 @@ func FormatMessage(m notify.Message) string {
 		var b strings.Builder
 		fmt.Fprintf(&b, "%s NeptHass started and found these sensors already in an alert state, as Home Assistant reports them. NeptHass cannot tell when they changed, and a device that sleeps may be showing its last known state:", ui.IconWarn)
 		for _, l := range m.Lines {
-			fmt.Fprintf(&b, "\n- **%s**: %s", name(l.Name), stateClause(l.Trigger, l.Meaning, l.Value, l.HasValue, l.Unit, l.Threshold))
+			fmt.Fprintf(&b, "\n- **%s**: %s", name(l.Name), stateClause(l.Category, l.Trigger, l.Meaning, l.Value, l.HasValue, l.Unit, l.Threshold))
 		}
 		if m.MoreLines > 0 {
 			fmt.Fprintf(&b, "\n- and %d more", m.MoreLines)
@@ -64,7 +64,7 @@ func formatAlert(m notify.Message) string {
 	case m.Initial:
 		// Found already present when NeptHass started: say what Home Assistant reports and what NeptHass
 		// does not know, so it is never mistaken for a new event.
-		fmt.Fprintf(&b, "%s **%s** %s, according to Home Assistant.", ui.IconWarn, name(m.Name), stateClause(m.Trigger, m.Meaning, m.Value, m.HasValue, m.Unit, m.Threshold))
+		fmt.Fprintf(&b, "%s **%s** %s, according to Home Assistant.", ui.IconWarn, name(m.Name), stateClause(m.Category, m.Trigger, m.Meaning, m.Value, m.HasValue, m.Unit, m.Threshold))
 		b.WriteString("\nNeptHass found it like this when it started, so this is not a new event and NeptHass cannot tell when it began.")
 		if !m.ReportedAt.IsZero() {
 			fmt.Fprintf(&b, " Home Assistant last updated it at %s; a device that sleeps may be reporting an old state.", ui.ClockTime(m.ReportedAt))
@@ -77,7 +77,7 @@ func formatAlert(m notify.Message) string {
 		}
 		b.WriteString(".")
 	default:
-		fmt.Fprintf(&b, "%s **%s** %s", ui.IconWarn, name(m.Name), stateClause(m.Trigger, m.Meaning, m.Value, m.HasValue, m.Unit, m.Threshold))
+		fmt.Fprintf(&b, "%s **%s** %s", ui.IconWarn, name(m.Name), stateClause(m.Category, m.Trigger, m.Meaning, m.Value, m.HasValue, m.Unit, m.Threshold))
 		if !m.ObservedAt.IsZero() {
 			fmt.Fprintf(&b, " at %s", ui.ClockTime(m.ObservedAt))
 		}
@@ -112,15 +112,8 @@ func heldClause(m notify.Message) string {
 	case notify.KindBelow:
 		return "has been below " + num(m.Threshold, m.Unit) + " for " + d + now(m.Value, m.HasValue, m.Unit)
 	}
-	switch m.Meaning {
-	case monitor.MeaningOpen:
-		return "has been open for " + d
-	case monitor.MeaningDetected:
-		return "has been detecting motion for " + d
-	case monitor.MeaningLow:
-		return "has reported a low battery for " + d
-	case monitor.MeaningWet:
-		return "has been wet for " + d
+	if s, ok := monitor.SpecFor(m.Category); ok && s.Held != "" && m.Meaning == s.AlertMeaning() {
+		return s.Held + " " + d
 	}
 	return "has been in its alert state for " + d
 }
@@ -147,22 +140,15 @@ func durationText(d time.Duration) string {
 	return strings.Join(parts, " ")
 }
 
-func stateClause(kind notify.Kind, meaning monitor.Meaning, value float64, hasValue bool, unit string, threshold *float64) string {
+func stateClause(cat monitor.Category, kind notify.Kind, meaning monitor.Meaning, value float64, hasValue bool, unit string, threshold *float64) string {
 	switch kind {
 	case notify.KindAbove:
 		return "rose above " + num(threshold, unit) + now(value, hasValue, unit)
 	case notify.KindBelow:
 		return "fell below " + num(threshold, unit) + now(value, hasValue, unit)
 	}
-	switch meaning {
-	case monitor.MeaningOpen:
-		return "is now open"
-	case monitor.MeaningDetected:
-		return "detected motion"
-	case monitor.MeaningWet:
-		return "is wet (water detected)"
-	case monitor.MeaningLow:
-		return "reports a low battery"
+	if s, ok := monitor.SpecFor(cat); ok && s.Alert != "" && meaning == s.AlertMeaning() {
+		return s.Alert
 	}
 	return "changed state"
 }
