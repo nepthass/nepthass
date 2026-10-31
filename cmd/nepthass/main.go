@@ -80,7 +80,7 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 	setupService := setup.NewService(setup.Deps{
 		DB: db, Store: setup.NewStore(db), Discovery: discovery, Permissions: perms, Aliases: aliases, Audit: auditLog, Now: time.Now,
 	})
-	hook := &changeHook{}
+	hook := &changeHook{hub: monitor.NewHub()}
 	mon, err := monitor.New(monitor.Config{HomeAssistant: cfg.HomeAssistant, Logger: log, OnChange: hook.OnChange})
 	if err != nil {
 		return err
@@ -159,11 +159,19 @@ func checkHomeAssistant(ctx context.Context, ha *rest.Client, log *slog.Logger) 
 // the monitor has not started.
 type changeHook struct {
 	fn atomic.Pointer[func(monitor.Change)]
+	// hub fans the same stream out to other consumers (a future browser event stream). With no
+	// subscriber it does nothing, so the engine path is exactly what it was.
+	hub *monitor.Hub
 }
 
 func (h *changeHook) set(f func(monitor.Change)) { h.fn.Store(&f) }
 
 func (h *changeHook) OnChange(c monitor.Change) {
+	// The hub never blocks and never panics, so it goes first: a panic in the engine callback
+	// (recovered by the monitor) cannot make a subscriber miss the change.
+	if h.hub != nil {
+		h.hub.Publish(c)
+	}
 	if f := h.fn.Load(); f != nil {
 		(*f)(c)
 	}
