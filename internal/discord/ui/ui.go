@@ -13,6 +13,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/nepthass/nepthass/internal/entities"
+	"github.com/nepthass/nepthass/internal/monitor"
 )
 
 const (
@@ -23,6 +24,7 @@ const (
 	ColorError = 0xD0021B
 
 	IconOK       = "\u2705"
+	IconInfo     = "\u2139\uFE0F"
 	IconDenied   = "\u26D4"
 	IconWarn     = "\u26A0\uFE0F"
 	IconFail     = "\u274C"
@@ -89,16 +91,18 @@ func Choice(name, value string) *discordgo.ApplicationCommandOptionChoice {
 	return &discordgo.ApplicationCommandOptionChoice{Name: Truncate(name, MaxChoice), Value: value}
 }
 
-// ReliableIcon is the check mark for a real value and a warning for unavailable or unknown.
-func ReliableIcon(reliable bool) string {
+// ReadingIcon is the neutral marker for a reading: an information mark for a real value and a
+// warning for unavailable or unknown. It is never a verdict, so no green check mark is used for a
+// state ("on" can mean open, wet or detected).
+func ReadingIcon(reliable bool) string {
 	if !reliable {
 		return IconWarn
 	}
-	return IconOK
+	return IconInfo
 }
 
-// StateIcon is ReliableIcon for a state.
-func StateIcon(s entities.State) string { return ReliableIcon(s.Reliable()) }
+// StateIcon is ReadingIcon for a state.
+func StateIcon(s entities.State) string { return ReadingIcon(s.Reliable()) }
 
 // DescribeValue renders a state value with its unit. Unavailable and unknown are
 // spelled out so they are never mistaken for an inactive or safe state.
@@ -112,8 +116,21 @@ func DescribeValue(state, unit string, reliable bool) string {
 	return Escape(state)
 }
 
-// DescribeState is DescribeValue for a state.
-func DescribeState(s entities.State) string { return DescribeValue(s.State, s.Unit(), s.Reliable()) }
+// DescribeReading renders a reading. For a supported binary class the meaning comes from the
+// registry ("open (on)"); every other entity shows its raw state, neutrally, with no interpretation.
+func DescribeReading(domain, class, state, unit string, reliable bool) string {
+	if spec, ok := monitor.Lookup(domain, class); ok && spec.Value == monitor.ValueBinary && reliable {
+		if in := monitor.Interpret(spec.Category, state); in.Meaning.Reliable() {
+			return Escape(in.Meaning.Text(spec.Category) + " (" + state + ")")
+		}
+	}
+	return DescribeValue(state, unit, reliable)
+}
+
+// DescribeState is DescribeReading for a state.
+func DescribeState(s entities.State) string {
+	return DescribeReading(string(s.ID.Domain()), s.DeviceClass(), s.State, s.Unit(), s.Reliable())
+}
 
 // Entity returns "entity" or "entities" to match n.
 func Entity(n int) string {
