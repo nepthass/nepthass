@@ -30,6 +30,18 @@ type cachedRule struct {
 // coalescing latch of v0.4.0.
 func (r cachedRule) stateful() bool { return r.Duration > 0 || r.HasClear }
 
+// ViolatedBy reports whether the sensor, as it reports right now, satisfies the
+// rule: a real reading, in the unit the threshold is bound to, in the rule's alert
+// state. It is the engine's own test, exported so an administrator can be told
+// when a rule is created on a sensor that is already in its alert state.
+func (r Rule) ViolatedBy(s monitor.Sensor) bool {
+	c := cachedRule{ID: r.ID, Entity: r.Entity, Kind: r.Kind, Unit: r.Unit, Duration: r.Duration}
+	if r.Threshold != nil {
+		c.Threshold = *r.Threshold
+	}
+	return usable(c, s) && reliableFor(c, s) && violates(c, s)
+}
+
 // ruleSet is an immutable snapshot of the enabled rules. The engine swaps whole
 // snapshots atomically, so the monitor callback never takes a lock to read it
 // and a configuration change can never be seen half applied.

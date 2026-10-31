@@ -29,9 +29,12 @@ type UserError struct {
 func (e *UserError) Error() string { return e.Msg }
 
 // RuleItem is a rule with its status and a display name that is never the entity ID.
+// AlreadyActive is set on the item returned by AddRule when the sensor was already
+// in the rule's alert state at that moment.
 type RuleItem struct {
 	notify.RuleView
-	Name string
+	Name          string
+	AlreadyActive bool
 }
 
 // NotificationStatus is everything /notifications status shows.
@@ -56,6 +59,9 @@ type Notifications interface {
 	Rules(ctx context.Context, actor auth.Actor) ([]RuleItem, error)
 	SetRuleEnabled(ctx context.Context, actor auth.Actor, id int64, enabled bool) error
 	RemoveRule(ctx context.Context, actor auth.Actor, id int64) error
+	// ConfirmUnit binds a rule created before units were tracked to its sensor's
+	// current unit and returns that unit.
+	ConfirmUnit(ctx context.Context, actor auth.Actor, id int64) (string, error)
 	SendTest(ctx context.Context, actor auth.Actor) error
 	Status(ctx context.Context, actor auth.Actor) (NotificationStatus, error)
 	// HealthLine is one non-sensitive line for /health, safe for any user.
@@ -64,7 +70,10 @@ type Notifications interface {
 
 const (
 	maxCooldownMinutes = int(notify.MaxCooldown / time.Minute)
-	maxListedRules     = 25
+	minDurationMinutes = int(notify.MinDuration / time.Minute)
+	maxDurationMinutes = int(notify.MaxDuration / time.Minute)
+	// listBudget keeps the rule list inside the embed description limit.
+	listBudget = 3600
 )
 
 func (r *Registry) cmdNotifications() command {
@@ -89,12 +98,16 @@ func (r *Registry) cmdNotifications() command {
 				sub("add", "Alert when a shared sensor changes (no threshold: state sensors; above or below: numeric sensors)",
 					entityOption("Sensor to watch"), number("above", "Alert when a numeric sensor rises above this value"),
 					number("below", "Alert when a numeric sensor falls below this value"),
+					number("clear", "With above or below: the value it must pass again before it can alert again (hysteresis)"),
+					&discordgo.ApplicationCommandOption{Type: discordgo.ApplicationCommandOptionInteger, Name: "for",
+						Description: "Alert only after the condition has held this many minutes (not for water leaks)", MinValue: &one, MaxValue: float64(maxDurationMinutes)},
 					&discordgo.ApplicationCommandOption{Type: discordgo.ApplicationCommandOptionInteger, Name: "cooldown",
 						Description: "Minutes between alerts for this rule (0 for none; default depends on the sensor type)", MinValue: &zero, MaxValue: float64(maxCooldownMinutes)}),
 				sub("list", "Show every rule and its status"),
 				sub("pause", "Pause one rule, or all notifications when no rule is given", rule(false, "Rule to pause")),
 				sub("resume", "Resume one rule, or all notifications when no rule is given", rule(false, "Rule to resume")),
 				sub("remove", "Delete a rule", rule(true, "Rule to delete")),
+				sub("unit", "Bind a rule created before v0.5.0 to its sensor's current unit", rule(true, "Rule to bind")),
 				sub("test", "Send a test message to the alert channel"),
 				sub("status", "Show delivery health, queue and rule status"),
 			},
@@ -119,6 +132,8 @@ func (r *Registry) notifications(ctx context.Context, req Request) Reply {
 		return r.notifyToggle(ctx, req, true)
 	case "remove":
 		return r.notifyRemove(ctx, req)
+	case "unit":
+		return r.notifyUnit(ctx, req)
 	case "test":
 		if err := r.deps.Notifications.SendTest(ctx, req.Actor); err != nil {
 			return r.notifyFail(req, err)
@@ -161,6 +176,18 @@ func (r *Registry) notifyAdd(ctx context.Context, req Request) Reply {
 	case hasBelow:
 		nr.Kind, nr.Threshold = notify.KindBelow, &below
 	}
+	if clear, has, cerr := optFloat(req.Args, "clear"); cerr != nil {
+		return Reply{Content: ui.IconFail + " " + cerr.Error()}
+	} else if has {
+		nr.Clear = &clear
+	}
+	if raw, ok := req.Args["for"]; ok {
+		minutes, perr := strconv.Atoi(raw)
+		if perr != nil || minutes < minDurationMinutes || minutes > maxDurationMinutes {
+			return Reply{Content: fmt.Sprintf("%s `for` must be between %d and %d minutes.", ui.IconFail, minDurationMinutes, maxDurationMinutes)}
+		}
+		nr.Duration = time.Duration(minutes) * time.Minute
+	}
 	if raw, ok := req.Args["cooldown"]; ok {
 		minutes, perr := strconv.Atoi(raw)
 		if perr != nil || minutes < 0 || minutes > maxCooldownMinutes {
@@ -173,7 +200,30 @@ func (r *Registry) notifyAdd(ctx context.Context, req Request) Reply {
 	if err != nil {
 		return r.notifyFail(req, err)
 	}
-	return Reply{Content: fmt.Sprintf("%s Rule #%d added: **%s** %s. Cooldown: %s.", ui.IconOK, item.ID, ui.Escape(item.Name), describeRule(item), cooldownText(item.Cooldown))}
+	msg := fmt.Sprintf("%s Rule #%d added: **%s** %s. Cooldown: %s.", ui.IconOK, item.ID, ui.Escape(item.Name), describeRule(item), cooldownText(item.Cooldown))
+	if item.AlreadyActive {
+		switch {
+		case item.Category.Hazard():
+			msg += "\n" + ui.IconWarn + " **This sensor is already in that state right now.** Because it is a critical alert, one alert is on its way to the channel, worded as what Home Assistant reports."
+		case item.Duration > 0:
+			msg += "\n" + ui.IconWarn + " This sensor is already in that state right now. NeptHass counts the duration from now, so it cannot alert before then."
+		default:
+			msg += "\n" + ui.IconWarn + " This sensor is already in that state right now, so nothing is sent for it. The rule alerts the next time it enters that state."
+		}
+	}
+	return Reply{Content: msg}
+}
+
+func (r *Registry) notifyUnit(ctx context.Context, req Request) Reply {
+	id, err := strconv.ParseInt(req.Args["rule"], 10, 64)
+	if err != nil {
+		return Reply{Content: ui.IconFail + " That is not a rule number."}
+	}
+	unit, err := r.deps.Notifications.ConfirmUnit(ctx, req.Actor, id)
+	if err != nil {
+		return r.notifyFail(req, err)
+	}
+	return Reply{Content: fmt.Sprintf("%s Rule #%d is now bound to **%s**. Its threshold is read in %s from now on, and the rule is evaluating. If the threshold was written in another unit, delete the rule and add it again.", ui.IconOK, id, ui.Escape(unit), ui.Escape(unit))}
 }
 
 func (r *Registry) notifyList(ctx context.Context, req Request) Reply {
@@ -186,11 +236,12 @@ func (r *Registry) notifyList(ctx context.Context, req Request) Reply {
 	}
 	var b strings.Builder
 	for i, it := range items {
-		if i == maxListedRules {
-			fmt.Fprintf(&b, "...and %d more.", len(items)-maxListedRules)
+		line := fmt.Sprintf("**#%d** %s: %s - %s\n", it.ID, ui.Escape(ui.Truncate(it.Name, 60)), describeRule(it), statusText(it.Status))
+		if b.Len()+len(line) > listBudget {
+			fmt.Fprintf(&b, "...and %d more. Use `/notifications status` for the counts.", len(items)-i)
 			break
 		}
-		fmt.Fprintf(&b, "**#%d** %s: %s - %s\n", it.ID, ui.Escape(ui.Truncate(it.Name, 60)), describeRule(it), statusText(it.Status))
+		b.WriteString(line)
 	}
 	e := ui.Embed("Notification rules", b.String(), ui.ColorOK)
 	return Reply{Embeds: []*discordgo.MessageEmbed{e}}
@@ -263,17 +314,39 @@ func (r *Registry) notifyStatus(ctx context.Context, req Request) Reply {
 	e.Fields = []*discordgo.MessageEmbedField{
 		ui.Field("Status", state, true),
 		ui.Field("Channel", channel, true),
-		ui.Field("Rules", fmt.Sprintf("%d active, %d paused, %d need sharing, %d not monitored, %d incompatible", st.Rules[notify.StatusActive],
-			st.Rules[notify.StatusPaused], st.Rules[notify.StatusNeedsSharing], st.Rules[notify.StatusNotMonitored], st.Rules[notify.StatusIncompatible]), false),
+		ui.Field("Rules", rulesText(st.Rules), false),
 		ui.Field("Delivery", last, false),
 		ui.Field("Queue", fmt.Sprintf("critical %d, normal %d, waiting to be evaluated %d\nsent %d, retried %d, muted by cooldown %d",
 			h.QueueCritical, h.QueueNormal, h.MailboxPending, h.Delivered, h.Retried, h.SuppressedCooldown), false),
 		ui.Field("Dropped", fmt.Sprintf("overflow %d, expired %d, channel failure %d, circuit breaker %d, revoked %d",
 			h.DroppedOverflow, h.DroppedTTL, h.DroppedPermanent, h.DroppedBreaker, h.DroppedRevoked), false),
+		ui.Field("Duration rules", fmt.Sprintf("%d counting now; %d alerted, %d ended without alerting", h.PendingEpisodes, h.EpisodesFired, h.EpisodesCancelled), false),
+		ui.Field("Since NeptHass started", startupText(h), false),
 		ui.Field("Health", health, false),
 		ui.Field("Monitoring-down alert", downStateText(h.DownState), false),
 	}
 	return Reply{Embeds: []*discordgo.MessageEmbed{e}}
+}
+
+// rulesText counts rules by status, naming only the statuses that occur beyond
+// the always-shown ones, and explains the two unit statuses.
+func rulesText(c map[notify.RuleStatus]int) string {
+	s := fmt.Sprintf("%d active, %d paused, %d need sharing, %d not monitored, %d incompatible", c[notify.StatusActive],
+		c[notify.StatusPaused], c[notify.StatusNeedsSharing], c[notify.StatusNotMonitored], c[notify.StatusIncompatible])
+	if n := c[notify.StatusUnitUnresolved]; n > 0 {
+		s += fmt.Sprintf("\n%s **%d rule(s) need their unit confirmed** and are not evaluating: they were created before units were tracked. Use `/notifications unit`.", ui.IconWarn, n)
+	}
+	if n := c[notify.StatusUnitChanged]; n > 0 {
+		s += fmt.Sprintf("\n%s **%d rule(s) are paused because their sensor changed unit.** Delete and add them again in the new unit; they resume by themselves if the unit returns.", ui.IconWarn, n)
+	}
+	return s
+}
+
+// startupText summarizes what NeptHass announced when it started.
+func startupText(h notify.Health) string {
+	s := fmt.Sprintf("%d hazard alert(s) for conditions already present; %d sensor(s) listed in the start-up summary (%d sent, %d held back to keep to one per 10 minutes); %d hazard alert(s) skipped because the same one was already delivered",
+		h.InitialAlerts, h.StartupListed, h.StartupSummaries, h.SummarySuppressed, h.MarkSuppressed)
+	return s
 }
 
 func downStateText(s string) string {
@@ -302,7 +375,7 @@ func (r *Registry) notifyFail(req Request, err error) Reply {
 	case errors.Is(err, notify.ErrRuleLimit):
 		return Reply{Content: fmt.Sprintf("%s You already have the maximum of %d rules. Delete one first.", ui.IconFail, notify.MaxRules)}
 	case errors.Is(err, notify.ErrRuleExists):
-		return Reply{Content: ui.IconFail + " That sensor already has a rule of that kind. Delete it first, or choose a different kind."}
+		return Reply{Content: ui.IconFail + " That sensor already has a rule of that kind and duration. Delete it first, or choose a different kind or duration."}
 	case errors.Is(err, notify.ErrRuleNotFound):
 		return Reply{Content: ui.IconFail + " There is no rule with that number. See `/notifications list`."}
 	case errors.Is(err, notify.ErrNotShared):
@@ -315,6 +388,20 @@ func (r *Registry) notifyFail(req Request, err error) Reply {
 		return Reply{Content: fmt.Sprintf("%s The threshold must be a finite number between -%d and %d, and only numeric sensors take one.", ui.IconFail, notify.MaxThreshold, notify.MaxThreshold)}
 	case errors.Is(err, notify.ErrInvalidCooldown):
 		return Reply{Content: fmt.Sprintf("%s Cooldown must be between 0 and %d minutes.", ui.IconFail, maxCooldownMinutes)}
+	case errors.Is(err, notify.ErrHazardImmediate):
+		return Reply{Content: ui.IconFail + " Water leak alerts are always immediate: they cannot be delayed or given a clear value."}
+	case errors.Is(err, notify.ErrInvalidDuration):
+		return Reply{Content: fmt.Sprintf("%s `for` must be between %d and %d minutes.", ui.IconFail, minDurationMinutes, maxDurationMinutes)}
+	case errors.Is(err, notify.ErrDurationNotAllowed):
+		return Reply{Content: ui.IconFail + " That sensor type does not support waiting for a duration."}
+	case errors.Is(err, notify.ErrInvalidClear):
+		return Reply{Content: ui.IconFail + " The clear value must be a finite number on the recovery side of the threshold: below it for `above`, above it for `below`."}
+	case errors.Is(err, notify.ErrClearNotAllowed):
+		return Reply{Content: ui.IconFail + " A clear value only applies to a numeric rule (`above` or `below`) on a sensor type that supports it."}
+	case errors.Is(err, notify.ErrUnitUnsupported):
+		return Reply{Content: ui.IconFail + " That sensor reports no unit, or a unit NeptHass does not support for this sensor type, so a threshold cannot be tied to it safely. Check the sensor in Home Assistant."}
+	case errors.Is(err, notify.ErrUnitBound):
+		return Reply{Content: ui.IconFail + " That rule is already bound to a unit. A unit is never rebound: delete the rule and add it again to use another unit."}
 	case errors.Is(err, notify.ErrInvalidEntity), errors.Is(err, notify.ErrInvalidKind), errors.Is(err, notify.ErrInvalidChannel):
 		return Reply{Content: ui.IconFail + " That value is not valid."}
 	}
@@ -335,16 +422,49 @@ func optFloat(args map[string]string, name string) (float64, bool, error) {
 }
 
 func describeRule(it RuleItem) string {
+	var s string
 	switch it.Kind {
 	case notify.KindAbove:
-		return "rises above " + formatThreshold(it.Threshold)
+		s = "rises above " + withUnit(it.Threshold, it.Unit)
 	case notify.KindBelow:
-		return "falls below " + formatThreshold(it.Threshold)
+		s = "falls below " + withUnit(it.Threshold, it.Unit)
+	default:
+		s = "when it changes state"
+		if sp, ok := monitor.SpecFor(it.Category); ok && sp.Phrase != "" {
+			s = sp.Phrase
+		}
 	}
-	if s, ok := monitor.SpecFor(it.Category); ok && s.Phrase != "" {
-		return s.Phrase
+	if it.Clear != nil {
+		dir := "below"
+		if it.Kind == notify.KindBelow {
+			dir = "above"
+		}
+		s += fmt.Sprintf(" (can alert again only after it is %s %s)", dir, withUnit(it.Clear, it.Unit))
 	}
-	return "when it changes state"
+	if it.Duration > 0 {
+		s += ", and stays that way for " + durationWords(it.Duration)
+	}
+	return s
+}
+
+// durationWords writes a rule duration: "10 min", "1 h 30 min".
+func durationWords(d time.Duration) string {
+	m := int(d / time.Minute)
+	if m < 60 {
+		return fmt.Sprintf("%d min", m)
+	}
+	if m%60 == 0 {
+		return fmt.Sprintf("%d h", m/60)
+	}
+	return fmt.Sprintf("%d h %d min", m/60, m%60)
+}
+
+func withUnit(t *float64, unit string) string {
+	s := formatThreshold(t)
+	if unit != "" {
+		s += " " + ui.Escape(ui.Truncate(unit, 12))
+	}
+	return s
 }
 
 func formatThreshold(t *float64) string {
@@ -376,6 +496,10 @@ func statusText(s notify.RuleStatus) string {
 		return "not monitored right now"
 	case notify.StatusIncompatible:
 		return "incompatible with the sensor type"
+	case notify.StatusUnitUnresolved:
+		return "NOT EVALUATING: created before units were tracked; confirm its unit with /notifications unit"
+	case notify.StatusUnitChanged:
+		return "NOT EVALUATING: the sensor now reports a different unit (delete and re-add it, or it resumes if the unit returns)"
 	}
 	return string(s)
 }
@@ -404,7 +528,7 @@ func (r *Registry) completeNotifications(ctx context.Context, req Request) []*di
 				if len(v.ID) > ui.MaxChoice || (query != "" && !strings.Contains(strings.ToLower(label+" "+string(v.ID)), query)) {
 					continue
 				}
-				out = append(out, ui.Choice(ui.Truncate(label+" ("+v.Category.Label()+")", 100), string(v.ID)))
+				out = append(out, ui.Choice(ui.Truncate(label+" ("+sensorKind(v)+")", 100), string(v.ID)))
 				if len(out) == 25 {
 					break
 				}
@@ -421,6 +545,9 @@ func (r *Registry) completeNotifications(ctx context.Context, req Request) []*di
 		}
 		var out []*discordgo.ApplicationCommandOptionChoice
 		for _, it := range items {
+			if req.Subcommand == "unit" && it.Status != notify.StatusUnitUnresolved {
+				continue // only a rule that needs its unit confirmed is offered
+			}
 			text := fmt.Sprintf("#%d %s - %s (%s)", it.ID, it.Name, describeRule(it), statusText(it.Status))
 			if query != "" && !strings.Contains(strings.ToLower(text), query) {
 				continue
@@ -433,6 +560,20 @@ func (r *Registry) completeNotifications(ctx context.Context, req Request) []*di
 		return out
 	}
 	return nil
+}
+
+// sensorKind describes what a sensor supports, so the administrator sees which
+// options apply before choosing: a numeric sensor shows its unit, a water leak
+// says its alerts are always immediate.
+func sensorKind(v monitor.View) string {
+	s := v.Category.Label()
+	switch {
+	case v.Category.Hazard():
+		s += ", immediate alerts only"
+	case v.Category.Numeric() && v.Unit != "":
+		s += ", " + v.Unit
+	}
+	return s
 }
 
 // sensorLabel names a sensor for the administrator: alias, else Home Assistant's
