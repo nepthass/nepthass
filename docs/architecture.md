@@ -2,7 +2,7 @@
 
 NeptHass is a modular monolith: one Go binary, one SQLite file, no public API. It only makes outbound connections (Discord, Home Assistant) and listens on no port.
 
-This document describes the system as of **v0.4.0**. The per-milestone design records are in [design/](design/): [interactive setup](design/interactive-setup.md), [sensor monitoring](design/sensor-monitoring.md) and [notifications](design/notifications.md).
+This document describes the system as of **v0.5.0 plus the unreleased sensor-registry hardening**. The per-milestone design records are in [design/](design/): [interactive setup](design/interactive-setup.md), [sensor monitoring](design/sensor-monitoring.md), [notifications](design/notifications.md) and [v0.5.0 rules](design/rules-v0.5.0.md).
 
 ## System overview
 

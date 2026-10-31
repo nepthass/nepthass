@@ -7,7 +7,7 @@ This guide takes a Linux machine that already runs Home Assistant to a working N
 1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and create a **New Application**.
 2. Copy the **Application ID** (General Information).
 3. Under **Bot**, create the bot and **Reset Token**. Copy it once; it is your `DISCORD_BOT_TOKEN`. NeptHass needs no privileged intents.
-4. Invite the bot to your server with this URL (replace `APPLICATION_ID`). The `applications.commands` scope is required for slash commands; NeptHass needs no channel permissions in v0.1.0 because every reply is ephemeral:
+4. Invite the bot to your server with this URL (replace `APPLICATION_ID`). The `applications.commands` scope is required for slash commands. The default invite grants no channel permissions because command replies are ephemeral; notifications need the explicit private-channel permissions in section 7.
 
    `https://discord.com/oauth2/authorize?client_id=APPLICATION_ID&scope=bot%20applications.commands&permissions=0`
 
@@ -59,7 +59,7 @@ A healthy start logs `authenticated with home assistant`, `connected to discord 
 
 Run `/setup` (administrators only). The wizard is private to you:
 
-1. **Connection health.** Discord, Home Assistant REST and SQLite are checked live. **Next** stays disabled until Home Assistant answers; setup never uses stale or invented entity data. (The Home Assistant WebSocket is not available in this release.)
+1. **Connection health.** Discord, Home Assistant REST and SQLite are checked live. **Next** stays disabled until Home Assistant answers; setup never uses stale or invented entity data. Live WebSocket monitoring starts alongside the bot and is reported separately by `/health`.
 2. **Discover devices.** Real entities with name, ID, state, device class and current sharing. Use **Search...** (words from the name, ID or device class), the domain menu (including **Shared only**), **Refresh** and the page buttons. Tick the entities you want to configure in the menu and press **Next**. Large homes work: the list is paged ten at a time.
 3. **Device permissions.** Pick an entity, then **Read**, **Control** or **No access**. Control is offered for lights and switches only. **All: read** and **Lights and switches: control** apply a rule to everything selected. Newly selected entities start as read-only.
 4. **Aliases.** Optionally give entities friendly names (letters, numbers, spaces and `- ' . ( )`, up to 32 characters, unique across NeptHass). They work in `/status`, `/control` and show in `/devices`. An alias never grants access.
@@ -88,7 +88,7 @@ Notifications are **disabled until an administrator sets a channel**, so nothing
 3. Run `/notifications channel` and pick the channel. NeptHass checks that it is a text channel of your server and that the bot can post there.
 4. Share the sensors you want alerts for (`/setup` or `/permissions allow`), then add rules with `/notifications add`. Send a test with `/notifications test`.
 
-Alerts are best-effort (10 minute staleness bound, possible duplicates), queued alerts are lost if NeptHass restarts, and a sensor that is already in its alert state when NeptHass starts is not announced. See [commands.md](commands.md#notifications) and [design/notifications.md](design/notifications.md).
+Alerts are best-effort (10 minute staleness bound, possible duplicates), and queued alerts are lost if NeptHass restarts. At start-up, an already-active water leak is announced once using conservative wording; other already-active conditions are summarized once after the baseline window, with restart deduplication and rate bounds. See [commands.md](commands.md#notifications) and [design/notifications.md](design/notifications.md).
 
 ## Networking
 
