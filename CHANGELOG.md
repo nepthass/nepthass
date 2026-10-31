@@ -33,6 +33,7 @@ Fifth milestone: richer rules and safer start-up (implemented on `feature/v0.5.0
 ### Known limitations
 
 - A start-up summary or hazard alert can be repeated **once** after a crash that happens after Discord accepted a message and before NeptHass wrote its mark.
+- A duration alert may say "at least" even for an opening NeptHass was watching, when its rule is loaded in the very instant that change is being delivered; it is never early.
 - Duration counts are in memory: after a restart or a monitoring outage they restart, so an alert can be later than the real duration (never earlier).
 - Smoke, gas and carbon monoxide are not supported; they need a dedicated safety policy.
 - No persisted outbox, a 10 minute staleness bound, one alert channel and possible duplicates remain as in v0.4.0.

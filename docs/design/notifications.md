@@ -108,6 +108,7 @@ A rule can override its cooldown (0 to 1440 minutes in `/notifications add`); **
 - When it comes due NeptHass **re-reads the current sensor** and sharing; a missed event cannot cause a false alert.
 - While monitoring is unhealthy nothing fires. When monitoring recovers every pending count restarts from the current sensors.
 - After a restart a sensor that is already violating is counted from its first sighting, so the alert can be later than the real duration. The message says "for **at least** 10 minutes" whenever NeptHass did not see the condition begin. Pending counts are in memory only; no precision across a restart is claimed.
+- A rule that is loaded or created in the instant between the monitor updating its sensor table and handing the change to the evaluator is seeded from a sensor it never saw change. The count then starts at that moment and the message says "at least": late, never early. (Reproduced deterministically by a test; a very narrow window in practice.)
 - Evaluation keeps a bounded ordered trail (16 changes) for sensors with such a rule; if it overflows the pending count is cancelled instead of guessed.
 - Water leak rules are immediate-only: a duration or clear value is refused, and a leak rule that reached the database with one never fires.
 

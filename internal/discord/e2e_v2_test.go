@@ -46,25 +46,66 @@ func TestE2E_aDurationAlertReachesDiscordWithItsWording(t *testing.T) {
 	if err != nil || item.Duration != 10*time.Minute || item.AlreadyActive {
 		t.Fatalf("a garage door rule for ten minutes: %+v %v", item, err)
 	}
+	// A barrier: an ordinary rule on another sensor whose alert proves the evaluator has finished its
+	// first pass, which seeds every rule from the tracker. Without it the evaluator can seed the garage
+	// rule from a door that is already open (see the next test) and the alert would rightly say "at least".
+	a.ready("binary_sensor.door", monitor.CategoryDoor)
+	doorClosed, _ := a.tracker.Get("binary_sensor.door")
+	if _, err := a.admin.AddRule(ctx0, adminActor, notify.NewRule{Entity: "binary_sensor.door", Kind: notify.KindState}); err != nil {
+		t.Fatal(err)
+	}
 	cancel, done := a.run()
 	defer func() { cancel(); <-done }()
 	a.clk.await(t, 1)
+	doorOpen := a.apply("binary_sensor.door", monitor.CategoryDoor, "Door", "on", "")
+	a.live(doorClosed, doorOpen)
+	a.stub.waitPosts(1)
 	open := a.apply("binary_sensor.garage", monitor.CategoryGarageDoor, "Garage", "on", "")
 	a.live(closed, open)
 	a.clk.await(t, 2) // the health watcher's tick and the evaluator's due timer
 	a.clk.Advance(9*time.Minute + 59*time.Second)
-	if n := len(a.stub.postsSnapshot()); n != 0 {
-		t.Fatalf("nothing a second before the duration: %d posts", n)
+	if n := len(a.stub.postsSnapshot()); n != 1 {
+		t.Fatalf("only the door's alert a second before the duration: %d posts", n)
 	}
 	a.clk.Advance(time.Second)
-	a.stub.waitPosts(1)
-	got := a.post(0)
+	a.stub.waitPosts(2)
+	got := a.post(1)
 	if !strings.Contains(got, "**Garage** has been open for 10 minutes") || strings.Contains(got, "binary_sensor") || strings.Contains(got, "at least") {
 		t.Fatalf("the delivered alert: %q", got)
 	}
 	am, _ := a.stub.postsSnapshot()[0].Body["allowed_mentions"].(map[string]any)
 	if parse, ok := am["parse"].([]any); !ok || len(parse) != 0 {
 		t.Errorf("it still pings no one: %+v", am)
+	}
+}
+
+// The monitor updates the tracker first and reports the change afterwards, and the evaluator reads
+// the tracker after it drains its mailbox, so a rule can be seeded from a sensor that has just opened
+// without ever having been told about the change. The evaluator then cannot know it saw the opening:
+// the duration counts from then and the alert says "at least" (late, never early).
+func TestE2E_aDurationSeededFromASensorThatHasJustOpenedCountsFromThenAndSaysAtLeast(t *testing.T) {
+	a := newAFix(t, true, nil)
+	if _, err := a.admin.SetChannel(ctx0, adminActor, stubChannel); err != nil {
+		t.Fatal(err)
+	}
+	a.ready("binary_sensor.garage", monitor.CategoryGarageDoor)
+	closed, _ := a.tracker.Get("binary_sensor.garage")
+	if _, err := a.admin.AddRule(ctx0, adminActor, notify.NewRule{Entity: "binary_sensor.garage", Kind: notify.KindState, Duration: 10 * time.Minute}); err != nil {
+		t.Fatal(err)
+	}
+	open := a.apply("binary_sensor.garage", monitor.CategoryGarageDoor, "Garage", "on", "") // the tracker is ahead
+	cancel, done := a.run()
+	defer func() { cancel(); <-done }()
+	a.clk.await(t, 2) // the evaluator seeded the rule from the tracker and armed its due timer
+	a.live(closed, open)
+	a.clk.Advance(9*time.Minute + 59*time.Second)
+	if n := len(a.stub.postsSnapshot()); n != 0 {
+		t.Fatalf("nothing a second before the duration: %d posts", n)
+	}
+	a.clk.Advance(time.Second)
+	a.stub.waitPosts(1)
+	if got := a.post(0); !strings.Contains(got, "**Garage** has been open for at least 10 minutes") {
+		t.Fatalf("a rule seeded from a sensor that was already open says so: %q", got)
 	}
 }
 
