@@ -248,7 +248,57 @@ Setup: a dedicated **test** server (never production), the bot invited with `app
 
 Not covered by any row because it needs special conditions: the 200-rule limit and the queue-overflow digest with many real sensors (covered by automated tests), and a failed configuration reload (covered by an automated test that breaks the store).
 
+### J. v0.5.0 rules, units, start-up alerts and audit (real Discord)
+
+**Not executed yet.** This checklist has no result column on purpose: record results (PASS, FAIL, BLOCKED, NOT TESTED or DEFERRED) in your own notes, never in this repository, and mark a row PASS only if you ran it and saw the result. Automated tests are not a substitute for these rows.
+
+**Setup.** A dedicated test server (never production); the dev stack with the `app` profile built from `feature/v0.5.0`; run the `NeptHass Dev: reset to baseline` script; share the nine virtual sensors with `/setup`; a **private** text channel where the bot has View Channel, Send Messages and Embed Links; `/notifications channel`. Use the NeptHass Dev dashboard (or the scenario scripts) to create every event: **no real hazard, smoke or gas is ever needed.** Durations below use the 2 minute setting; the minimum is 1 minute. Restarting NeptHass only: `docker compose --env-file .env.dev -f compose.dev.yaml --profile app restart nepthass`. Never touch the `nepthass-dev_*` data volumes; for the upgrade rows use a **copy** of a v0.4.0 database in a separate volume.
+
+| # | Step | Expected |
+| --- | --- | --- |
+| V01 | `/notifications add` autocomplete, typing "garage" and "leak" | Garage door and Opening are offered; the leak says "immediate alerts only"; numeric sensors show their unit; no entity IDs |
+| V02 | Add an immediate rule for the garage door and for the opening; run `scenario_garage_door_opened` and `scenario_opening_opened` | One alert each, "is now open", no ping |
+| V03 | `/notifications add entity:<water leak> for:5` | Refused: water leak alerts are always immediate; nothing is saved |
+| V04 | `/notifications add entity:<door> clear:5` | Refused: a clear value only applies to a numeric rule |
+| V05 | Add `<door> for:2`; open the door and wait | No alert before 2 minutes; at 2 minutes one alert "has been open for 2 minutes"; none more while it stays open |
+| V06 | Open the door, close it after 1 minute, wait 3 minutes | No alert; `/notifications status` counts one episode that ended without alerting |
+| V07 | Open the door; after 1 minute turn its offline helper on, after 10 seconds off (still open) | The count restarts when the sensor returns: the alert comes about 2 minutes after it returned, not earlier |
+| V08 | Open the door; after 1 minute `/permissions revoke` the door; wait 3 minutes | No alert; the rule is listed as needing sharing |
+| V09 | Open the door; `/notifications pause rule` at 1 minute, `resume` at 1.5 minutes | The alert comes 2 minutes after the resume, not earlier |
+| V10 | Open the door; after 1 minute restart NeptHass | No alert for at least 2 minutes after the restart; the alert says "at least"; never earlier |
+| V11 | Open the door; stop Home Assistant for longer than the duration, then start it | No duration alert while monitoring is down (the monitoring-down notice follows after 5 minutes); after recovery the count restarts; the alert is late and says "at least" |
+| V12 | On one door: an immediate rule, `for:2` and `for:3`; open it | Three alerts, about 0, 2 and 3 minutes after it opened |
+| V13 | `<temperature> above:30 for:2`; set the temperature to 31.2 and hold; separately set 31.2 then 29 within a minute | First case: one alert after 2 minutes with the value and °C. Second case: no alert |
+| V14 | `<temperature> above:30 clear:28 cooldown:0`; set 31, 29, 31, 27, 31 (one at a time) | An alert at the first 31 and at the last 31 only |
+| V15 | `<temperature> below:5 clear:7 cooldown:0`; set 4, 6, 4, 8, 4 | An alert at the first 4 and at the last 4 only |
+| V16 | `above:30 clear:30`, `above:30 clear:31`, `below:5 clear:4` | Each refused with the recovery-side message |
+| V17 | With the temperature at 31 and an `above:30 clear:28` rule, restart NeptHass; then set 29, 31, 27, 31 | No alert at the restart; none for 29 or the following 31; an alert after 27 then 31 |
+| V18 | `/notifications list` | Each rule shows its threshold with the unit, the clear value, the duration and "active" |
+| V19 | Change the temperature sensor's unit to °F (see the virtual devices guide); `/notifications list`, then set a value above the threshold | The rule says it is not evaluating because the unit changed; no alert; `status` warns about it |
+| V20 | Change the unit back to °C | The rule resumes by itself and works again |
+| V21 | Start v0.5.0 on a copy of a v0.4.0 database that has a humidity rule and a temperature rule | The humidity rule is bound by itself (audit shows the system action) and evaluates; the temperature rule says it needs its unit confirmed and sends nothing |
+| V22 | As a non-administrator and as an administrator: `/notifications unit rule:<temperature rule>` | Refused for the non-administrator; for the administrator it binds to the sensor's current unit and the rule evaluates; running it again is refused ("never rebound"); autocomplete offered only that rule |
+| V23 | Turn the water leak helper on, restart NeptHass | One critical alert: wet according to Home Assistant, "not a new event", when it was last updated, "please check it"; no earlier alert |
+| V24 | Restart NeptHass again straight away, then again after 20 minutes (leak still on, Home Assistant not restarted) | No second alert either time |
+| V25 | Restart Home Assistant and, 20 minutes after the first alert, NeptHass (leak still on) | One reminder alert (the episode identity changed) |
+| V26 | Open the door, the window, the garage door and the opening (immediate rules on each), restart NeptHass | No individual alerts; one start-up summary about 2 minutes after the start that lists the open ones by name |
+| V27 | Restart again within 10 minutes, then after 10 minutes | No summary within 10 minutes; a new one after |
+| V28 | Turn every offline helper on, restart NeptHass, wait 3 minutes; then turn the leak on and the leak's offline helper off | Nothing sent at the start; when the leak sensor returns wet one "uncertain" alert (not a start-up alert) |
+| V29 | Create a door rule on an already open door; create a leak rule on a wet leak sensor | The door reply says nothing is sent now and no summary ever lists it; the leak reply says an alert is on its way and one arrives |
+| V30 | Restart only Home Assistant | No start-up alert or summary (a reconnect is not a start); a change that happened during the outage is reported as detected after reconnecting |
+| V31 | Pause all notifications, or unshare the sensor, then restart with the leak wet | Nothing sent |
+| V32 | Remove the bot's Send Messages permission in the alert channel, restart with the leak wet; restore it and restart again | The first attempt fails (visible in `status`), no mark is kept, the next start announces it |
+| V33 | As a non-administrator run `/notifications add` and `/permissions allow` | Refused with the usual message; `/audit` shows denied rows with reason not_admin, the command and subcommand names, and no sensor name or option value |
+| V34 | As a user on no allowlist run an administrator command | Refused; `/audit` shows reason not_allowed |
+| V35 | (Needs the bot in a second server with global command scope) run an administrator command there and in a direct message | Refused; `/audit` shows reason wrong_guild with the guild ID or none |
+| V36 | Run a refused administrator command about 10 times in a minute | Replies unchanged; at most 3 rows, later rows say suppressed=N |
+| V37 | `/audit` after all of the above | Denials, rule changes and unit bindings are listed; no tokens, no option values, no entity IDs of refused attempts |
+
+Not testable with the virtual devices: more than three simultaneous hazards (there is one virtual leak sensor; covered by automated tests only), and a Discord-only outage or a real rate limit (see the known gaps).
+
 ## Known gaps
+
+**v0.5.0 (group J):** the checklist above has not been run. In particular nothing about the start-up behavior, the durations, the units or the denial audit has been seen on real Discord. The automated tests use a stub Discord server, so they prove NeptHass's requests and decisions, not what Discord shows.
 
 What the automated tests do not prove, and what is still checked by hand:
 

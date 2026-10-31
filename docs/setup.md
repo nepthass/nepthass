@@ -161,3 +161,11 @@ The upgrade was verified on a copy of a real v0.1.0 database: permissions and au
 3. Notifications stay **disabled** until an administrator runs `/notifications channel`; `/health` shows a Notifications line that reads "Disabled". The slash commands are re-registered at start, so `/notifications` appears after the first start.
 4. Existing permissions, aliases, setup sessions and the audit log are untouched.
 5. Pending alerts live in memory only, so restarting NeptHass (including this upgrade) loses any alert that was queued at that moment.
+
+### From v0.4.0 to v0.5.0
+
+1. **Back up first** (see "Data, retention and backups" above). Migration 0004 rebuilds the notification rules table inside one transaction, keeping every rule, its ID and the ID sequence, and adds a table for hazard delivery marks and a settings column. A v0.4.0 build **refuses to start on an upgraded database**; going back means restoring the backup, and rules or marks created since the upgrade are lost with it.
+2. There are **no new environment variables**. Rebuild and restart as usual: `git pull && docker compose up -d --build`.
+3. **Check `/notifications status` and `/notifications list` after the upgrade.** Rules on humidity and battery sensors are bound to their unit automatically as soon as the sensor reports. **Temperature rules created before the upgrade show "not evaluating"** until an administrator runs `/notifications unit rule:<n>`, because NeptHass cannot know whether the threshold was written in °C, °F or K. Until then those rules send nothing.
+4. **Start-up behavior changed.** A water leak that is already wet when NeptHass starts is announced once, and other sensors already in an alert state are listed in one summary after about two minutes. After the first start with v0.5.0 you may therefore see one summary and, if a leak sensor is wet, one alert; this is expected.
+5. New options: `for` (a delay in minutes) and `clear` (a recovery value) on `/notifications add`; `garage_door` and `opening` sensors can now be watched.

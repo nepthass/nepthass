@@ -82,7 +82,7 @@ This starts **only Home Assistant**. NeptHass is in the `app` profile and starts
    HA_TOKEN=<the copied token>
    ```
 
-Check that the simulation loaded: **Settings > Devices & services > Entities**, search `nepthass_dev`. You should see the light, the switch, seven sensors, the helpers and eight scenario scripts. If something is missing, see [Troubleshooting](#troubleshooting) below.
+Check that the simulation loaded: **Settings > Devices & services > Entities**, search `nepthass_dev`. You should see the light, the switch, nine sensors, the helpers and the scenario scripts. If something is missing, see [Troubleshooting](#troubleshooting) below.
 
 ## 4. Create the Discord test bot
 
@@ -178,7 +178,7 @@ With the stack running (`--profile app`), run `/setup` in your test server. The 
 
 ## Trying live monitoring (v0.3.0)
 
-With the stack running (`--profile app`), `/health` should show "Healthy: N sensors tracked" on the "Home Assistant WebSocket (live monitoring)" line, with all four layers ticked. Share the seven virtual sensors (`/setup`), then run `/sensors` and trigger scenarios in Home Assistant as described in [virtual-devices.md](virtual-devices.md#using-them-with-live-monitoring-v030). To see recovery, restart only Home Assistant (`docker compose --env-file .env.dev -f compose.dev.yaml restart homeassistant`) and watch `/health` go to reconnecting and back. The checklist is group H of [smoke-tests.md](smoke-tests.md).
+With the stack running (`--profile app`), `/health` should show "Healthy: N sensors tracked" on the "Home Assistant WebSocket (live monitoring)" line, with all four layers ticked. Share the nine virtual sensors (`/setup`), then run `/sensors` and trigger scenarios in Home Assistant as described in [virtual-devices.md](virtual-devices.md#using-them-with-live-monitoring-v030). To see recovery, restart only Home Assistant (`docker compose --env-file .env.dev -f compose.dev.yaml restart homeassistant`) and watch `/health` go to reconnecting and back. The checklist is group H of [smoke-tests.md](smoke-tests.md).
 
 ## Trying notifications (v0.4.0)
 

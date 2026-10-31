@@ -1,6 +1,6 @@
 # v0.5.0 design: rule semantics, safe start-up and a sensor capability registry
 
-**Status: design approved for implementation planning. Decisions D1 to D5 are final. No v0.5.0 code exists.** This replaces the earlier proposal text (Git history keeps it). It builds on the shipped design in [notifications.md](notifications.md) and on the [architecture](../architecture.md).
+**Status: implemented on `feature/v0.5.0`; automated verification done, manual Discord QA pending; not released. Decisions D1 to D5 (and the follow-up decisions U1 to U6) are final.** The sections below are the design as approved; the table in "Implementation notes" lists where the implementation went beyond or differs from it. This replaces the earlier proposal text (Git history keeps it). It builds on the shipped design in [notifications.md](notifications.md) and on the [architecture](../architecture.md).
 
 ## 1. Summary
 
@@ -8,6 +8,19 @@
 - **Recommendation for the sensor model: a small typed Go capability registry as a prerequisite (option B), not a JSON catalog.** The audit shows sensor knowledge is hardcoded in a closed table of eight classes plus about ten per-category switches across three packages, and that "critical" is a literal `CategoryLeak` check in three places. Duration, hysteresis, hazard and unit rules each need a per-category property; implementing them with more switches would make that worse (sections 3, 6, 8).
 - **Not in v0.5.0:** new sensor categories beyond an optional pair of one-row additions, a declarative catalog, smoke, gas and carbon monoxide alerts, quiet hours, a persisted outbox.
 - **Migration 0004** rebuilds `notification_rules` (D1) and adds two small pieces of persistence needed by D5. Its SQL was executed against the real 0003 schema with adversarial data (section 12).
+
+## Implementation notes
+
+| Topic | Design said | Implemented |
+| --- | --- | --- |
+| Denial audit scope | Exclude other guilds and direct messages | **Included** (U6): reason `wrong_guild`, bounded by the same limits |
+| Legacy unit binding | One-time audited update | Automatic only for classes with one documented unit (humidity, battery), by the engine through an audited system action; temperature waits for an administrator, who confirms with the new `/notifications unit` command |
+| Duration vs monitoring outage | Re-read the sensor when due | Also: nothing fires while monitoring is unhealthy, and pending counts restart when it recovers |
+| Mailbox | Bounded slice, `sawClear` bit | Stateful rules (a duration or a clear value) replay a bounded ordered trail instead; plain rules keep the v0.4.0 latch; overflow cancels |
+| Start-up summary scope | Window after the first sighting | A rule an administrator creates on an active sensor is never listed as "found at start-up" (the reply to `add` tells the administrator) |
+| Hazard budget | Three, folded into one message | Folded hazards go out at once as one critical message and leave marks |
+| Hazard rule with a duration in the database | Refused by validation | Also dormant in the engine and shown as incompatible (defense in depth) |
+| Task T20 (`last_changed` refinement) | Optional | Not implemented (U3) |
 
 ## 2. Approved decisions
 

@@ -17,22 +17,23 @@ You often want your family or housemates to check a sensor or switch a light wit
 - **Control** lights and switches with `/control`. Every other kind of device is read-only at most.
 - **Share explicitly.** An entity is invisible until an administrator shares it at `read` or `control` level, with a guided `/setup` wizard, aliases and an audit log.
 - **Monitor live.** A persistent connection to the Home Assistant WebSocket tracks temperature, humidity, battery, motion, door, window and water-leak sensors; `/sensors` shows them, and `/health` says honestly whether monitoring is live.
-- **Notify.** Administrators choose one Discord text channel and create rules (a door opens, motion, a leak, a low battery, a value above or below a threshold) with per-rule cooldowns. NeptHass also tells that channel when it has lost sight of Home Assistant. Alerts never ping anyone and respect sharing at every step.
+- **Notify.** Administrators choose one Discord text channel and create rules (a door, window, garage door or opening opens, motion, a leak, a low battery, a value above or below a threshold), optionally **only after the condition has held for a while** and with a **separate recovery value** so a reading hovering around a threshold does not repeat. Thresholds are tied to the sensor's unit. NeptHass also tells that channel when it has lost sight of Home Assistant. Alerts never ping anyone and respect sharing at every step.
 - **Stay private.** No listening ports, secrets only in the environment, secret redaction in logs, replies visible only to the person who asked.
 
 ## Project maturity
 
 NeptHass is **pre-1.0** and is developed milestone by milestone in a private repository; a public launch is planned for a later milestone. Each release is verified by automated tests, including a suite that runs against a real Home Assistant, and by manual testing on a Discord test server. Manual coverage is partial for v0.4.0; see [the known gaps](docs/development/smoke-tests.md#known-gaps).
 
-**Notifications are best-effort, not an alarm system.** Delivery has a bounded staleness (10 minutes) and can occasionally duplicate. Queued alerts are kept in memory, so a crash or restart loses what was waiting, and a sensor that is already in its alert state when NeptHass starts is not announced. Do not rely on them for life-safety. Details and guarantees: [docs/design/notifications.md](docs/design/notifications.md).
+**Notifications are best-effort, not an alarm system.** Delivery has a bounded staleness (10 minutes) and can occasionally duplicate. Queued alerts are kept in memory, so a crash or restart loses what was waiting. When NeptHass starts it cannot know when a condition began: a water leak that is already wet is announced once (as what Home Assistant reports, not as a new event) and other conditions are listed in one start-up summary. Do not rely on notifications for life-safety. Details and guarantees: [docs/design/notifications.md](docs/design/notifications.md).
 
 | Version | Scope | Status |
 | --- | --- | --- |
 | v0.1.0 | Foundation: configuration, Discord connection, Home Assistant REST client, SQLite, authorization, basic commands, Docker | Released |
 | v0.2.0 | Interactive `/setup` wizard, entity discovery, aliases, `/sync` | Released |
 | v0.3.0 | Home Assistant WebSocket, real-time sensor monitoring | Released |
-| v0.4.0 | Smart notifications and monitoring-down notices | Released (latest) |
-| v0.5.0 and later | See the [roadmap](docs/roadmap.md) | Planned |
+| v0.4.0 | Smart notifications and monitoring-down notices | Released |
+| v0.5.0 | Richer rules and safer start-up: durations, hysteresis, unit-safe thresholds, start-up alerting, audit of refused commands, garage door and opening sensors | **Implemented on `feature/v0.5.0`; manual QA pending; not released** |
+| v0.6.0 and later | See the [roadmap](docs/roadmap.md) | Planned |
 
 Release history: [CHANGELOG.md](CHANGELOG.md).
 
@@ -85,7 +86,7 @@ The full walkthrough, bridge-network setup, secret files and upgrade notes are i
 | `/setup` | admins | Guided wizard: discover entities, share them, set aliases |
 | `/sync` | admins | Refresh the view of Home Assistant's entities |
 | `/permissions allow\|revoke\|list` | admins | Manage which entities are shared and at what level |
-| `/notifications channel\|add\|list\|pause\|resume\|remove\|test\|status` | admins | Configure and monitor alerts |
+| `/notifications channel\|add\|list\|pause\|resume\|remove\|unit\|test\|status` | admins | Configure and monitor alerts |
 | `/audit [count]` | admins | Recent control attempts and configuration changes |
 
 "Users" are the administrators plus anyone in `DISCORD_ALLOWED_USER_IDS`. Aliases work wherever an entity is expected. Full reference: [docs/commands.md](docs/commands.md).

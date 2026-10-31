@@ -37,6 +37,7 @@ CI runs the same checks. To try NeptHass against a real Home Assistant without a
 - Pass `context.Context` first and propagate it. Keep interfaces small and defined where they are used.
 - Structured logging with `log/slog`. Never log secrets, tokens or full request bodies.
 - SQL is always parameterized. Schema changes are new files in `migrations/` (`NNNN_description.sql`); never edit a released migration (a checksum check will refuse to start).
+- Supporting a new sensor class is one row in `internal/monitor/registry.go` (domain, device class, labels, rule wording, the polarity and meanings from Home Assistant's documented contract, units, cooldown, capabilities) plus its tests; the registry tests refuse an incomplete or inconsistent row and a category constant without a row. Never infer polarity from a class name: read Home Assistant's `binary_sensor/const.py`. A **hazard** class (anything life-safety: smoke, gas, carbon monoxide, water) needs a design discussion first: hazard status is explicit, immediate-only and announced at start-up.
 - Keep Discord-specific code in `internal/discord`; business rules belong in `internal/entities` and friends.
 - Prefer the standard library. A new dependency needs a clear justification in the pull request and a note in the changelog.
 - Keep files focused (aim for under about 250 lines) and avoid abstractions without a second user.

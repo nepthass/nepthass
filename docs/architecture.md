@@ -58,7 +58,8 @@ internal/entities             entity model, permissions, aliases, discovery cach
 internal/setup                setup sessions: state machine, store, plan, atomic apply (Discord-free)
 internal/homeassistant/rest   Home Assistant REST client (service allowlist)
 internal/homeassistant/ws     Home Assistant WebSocket session: handshake, id correlation, reader, ping
-internal/monitor              live monitoring: state machine, backoff, reconciliation, Tracker, change feed, Reader
+internal/monitor              live monitoring: state machine, backoff, reconciliation, Tracker, change feed, Reader, and the typed
+                              sensor capability registry (registry.go): the one table of supported classes
 internal/notify               notification rules, engine (mailbox, evaluator, queues, dispatcher, breaker,
                               monitoring-down state machine); transport-neutral, no Discord imports
 internal/discord              gateway session, interaction routing, Notifier (Discord REST sender), channel
@@ -102,7 +103,7 @@ On SIGTERM or SIGINT the root context is cancelled: the bot closes its session, 
 | --- | --- | --- |
 | Discord gateway and one goroutine per interaction | discordgo + `Bot.serve` (panic-safe) | rate limiter (mutex), SQLite pool |
 | Monitor supervisor, WebSocket reader, pinger | `monitor.Monitor`, `ws.Session` | `Tracker` (mutex), change feed callback |
-| Engine evaluator | `notify.Engine` | rule states (owned by this goroutine), mailbox (mutex), queue (mutex) |
+| Engine evaluator | `notify.Engine` | rule states and pending duration episodes (owned by this goroutine; one timer, no goroutine per episode), mailbox (mutex), queue (mutex) |
 | Engine dispatcher (and one short-lived goroutine per send) | `notify.Engine` | queue, breaker (mutex), token bucket (mutex), counters (atomics) |
 | Engine health watcher | `notify.Engine` | monitoring-down state machine (mutex), reload retry |
 | Audit retention | `audit.Log` | SQLite |
@@ -127,7 +128,7 @@ On SIGTERM or SIGINT the root context is cancelled: the bot closes its session, 
 | --- | --- | --- |
 | Guild | `auth.Authorizer` | Interaction must come from `DISCORD_GUILD_ID` (DMs rejected) |
 | User | `auth.Authorizer` | Admin list, or optional user list; everyone else rejected |
-| Command level | `commands.Registry`, services | `/permissions`, `/audit`, `/setup`, `/sync` and `/notifications` need administrator level, checked at the gate and again in the service |
+| Command level | `commands.Registry`, services | `/permissions`, `/audit`, `/setup`, `/sync` and `/notifications` need administrator level, checked at the gate and again in the service. A refusal of an administrator command is audited (`audit.Denials`: fixed reasons, rate limits, retention cap) at the two places it is decided: `Bot.reject` and `Registry.Run` |
 | Setup session | `setup.Service` | Every wizard operation requires administrator level and a session owned by the caller |
 | Entity | `entities.Permissions` | No row means no access, even for administrators |
 | Domain | `entities.Domain.Controllable`, `rest.allowedServices` | Only `light` and `switch` can be controlled |
@@ -141,7 +142,7 @@ Discord roles and channel permissions play no part in *who may use commands*. Th
 - **REST** is authoritative for commands: one request per use, redirects never followed, a service allowlist inside the client. It never depends on the WebSocket, so commands keep working while monitoring is down.
 - **WebSocket** feeds live state: one session, `subscribe_events` for `state_changed`, buffered events replayed after an authoritative `get_states` snapshot on every (re)connect, health reported as five separate facts. Home Assistant does not replay missed events; NeptHass never invents them and finds what changed while disconnected through the snapshot. Details: [design/sensor-monitoring.md](design/sensor-monitoring.md).
 - `Tracker` keeps the latest state of every classified `sensor` and `binary_sensor` in memory only (nothing is written to SQLite).
-- **Classification.** A sensor is classified only by its domain and `device_class` (never by entity-ID text) using a closed table of eight classes in `internal/monitor/classify.go`; a state is interpreted per category in `meaning.go` (`on` means open, detected, wet or low). An unknown class is not monitored and cannot be used in rules, but the entity can still be shared and read with `/status`. The verified inventory, and the typed capability registry planned to replace the per-category switches, are in [design/rules-v0.5.0.md](design/rules-v0.5.0.md#3-how-sensor-support-works-today-audit).
+- **Classification.** A sensor is classified only by its domain and `device_class` (never by entity-ID text) through the typed registry in `internal/monitor/registry.go`: one row per supported class (domain, class, labels, rule wording, binary polarity and meanings taken from Home Assistant's contract, numeric range and documented units, default cooldown, the explicit hazard flag and the rule capabilities). `monitor`, `notify` and `discord` read it; nothing else switches on a category name, an unknown class is not monitored (there is no generic fallback), and tests refuse an incomplete or inconsistent row. The inventory and the reasoning are in [design/rules-v0.5.0.md](design/rules-v0.5.0.md#3-how-sensor-support-works-today-audit).
 
 ## Entities, sharing, permissions and aliases
 
@@ -179,8 +180,9 @@ Migrations are embedded from `migrations/`, applied in order inside transactions
 | `entity_aliases` | canonical entity ID to alias, unique case-insensitively (v0.2.0) |
 | `setup_sessions` | persisted wizard sessions: JSON draft, step, status, version, expiry (v0.2.0) |
 | `known_entities` | minimal `/sync` registry: entity ID, domain, first/last seen, missing since (v0.2.0) |
-| `notification_settings` | per guild: alert channel and enabled flag; no row means disabled (v0.4.0) |
-| `notification_rules` | one row per rule, at most 200, unique per entity and kind (v0.4.0) |
+| `notification_settings` | per guild: alert channel, enabled flag and the time of the last start-up summary; no row means disabled |
+| `notification_rules` | one row per rule, at most 200, unique per entity, kind and duration; duration, clear value and the unit the threshold is bound to (v0.5.0) |
+| `notification_marks` | one row per delivered hazard alert: rule, Home Assistant episode identity, delivery time (v0.5.0) |
 | `schema_migrations` | applied migrations and checksums |
 
 Each package owns the SQL for its own tables. Timestamps are fixed-width UTC text so they sort chronologically. The database runs in WAL mode with foreign keys on; the file is created with owner-only permissions. There is deliberately **no outbox table**: pending notifications live in memory only. Migrations 0002 and 0003 only add tables, so older databases upgrade in place, but an older binary refuses an upgraded database, so a downgrade means restoring a backup.
@@ -228,12 +230,10 @@ Leave alone without evidence that it is wrong: the mailbox, the two lanes, the d
 
 ## Known technical debt
 
-1. `ruleState.active` in `internal/notify/engine.go` is assigned in several places but never read; re-arming works because `enters()` is a pure function of the previous and current state. There is no per-rule "armed" state, which stateful rules (hysteresis) will need.
-2. The mailbox slot holds a fixed `maxLatches = 2` array, encoding "at most one above and one below rule per entity". Several rules per entity and kind would break it.
-3. `engine.go` (647 lines) combines the evaluator, digest, watcher and health reporting; it is the largest file and should be split along those lines before it grows.
-4. The test clock is copied into three test packages (`internal/notify`, `internal/discord`, `tests/integration`); a shared test helper would prevent drift.
-5. `Engine` has no outcome event, so tests poll `Health()` counters with a bounded deadline.
-6. Alert-channel validation uses discordgo's session state first; the bot connects with the `Guilds` intent only, so changes to the bot's own roles may not reach the cache until a restart. A failed send still surfaces the real problem.
-7. A non-administrator's refused command is not audited by the command gate (for any administrator command).
-8. `Notifier.Send` reads the notification settings from SQLite on every send.
-9. Sensor classification knowledge is spread over `monitor`, `notify` and `discord` (about ten per-category switches), "critical" is a hardcoded comparison with the leak category, and units are stored but never validated. A typed capability registry is planned ([design/rules-v0.5.0.md](design/rules-v0.5.0.md)).
+1. `engine.go` combines the evaluator, the stateful-rule replay, duration firing, the digest, the watcher and health reporting; `initialstate.go` already holds the start-up model. Splitting the evaluator and the duration scheduler into their own files is the next cleanup.
+2. The test clock is copied into three test packages (`internal/notify`, `internal/discord`, `tests/integration`); a shared test helper would prevent drift.
+3. `Engine` has no outcome event, so tests poll `Health()` counters with a bounded deadline.
+4. Alert-channel validation uses discordgo's session state first; the bot connects with the `Guilds` intent only, so changes to the bot's own roles may not reach the cache until a restart. A failed send still surfaces the real problem.
+5. `Notifier.Send` reads the notification settings from SQLite on every send.
+6. Stateful rules (a duration or a clear value) keep a bounded ordered trail per entity; plain immediate rules keep the v0.4.0 coalescing latch. Two paths exist on purpose (the plain path is the differential oracle of the existing tests); unifying them is possible but not free.
+7. `discord.New` sets discordgo's package-level logger hook, so bots cannot be created concurrently (a test constraint, not a production one).

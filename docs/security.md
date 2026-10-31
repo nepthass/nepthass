@@ -64,7 +64,7 @@ Known limitations of monitoring: it observes only. On its own it notifies no one
 
 ## Notifications (v0.4.0)
 
-- **Administrators only.** `/notifications` requires the administrator level. A non-administrator is refused by the command gate ("This command is for NeptHass administrators.") before any notification code runs. As for every administrator command, **that refusal is not written to the audit log**; a denial that reaches the service layer is.
+- **Administrators only.** `/notifications` requires the administrator level. A non-administrator is refused by the command gate ("This command is for NeptHass administrators.") before any notification code runs. **Since v0.5.0 that refusal is audited** (see below).
 - **Audit.** Every change is audited in the same transaction. Denied and failed actions are audited as well: a rejected channel is recorded with a fixed reason code (for example `rejected_not_text`), a test message with its outcome. The audit log receives only fixed sentinel wording, never user input, Discord error text, tokens or sensor values (anything unrecognized is stored as "internal error"). A successful channel change records the new channel ID, which is not a secret.
 - **Sharing is the gate.** An alert is produced only for an entity shared at `read` or higher, and sharing is read again immediately before every delivery attempt, including retries and each line of a digest. Revoking an entity stops its alerts and leaves its rules dormant. **Unavoidable race:** a revocation that lands after that last check and before Discord accepts the request cannot be recalled; the window is one HTTP request.
 - **Channel visibility is the privacy boundary.** Everyone who can read the alert channel sees the alerts (sensor names and states), regardless of their own NeptHass access. Choose a private channel. NeptHass verifies the channel's guild, type and the bot's permissions when it is chosen, and notices permission loss or deletion on the next send; it cannot see who can read the channel.
@@ -73,6 +73,18 @@ Known limitations of monitoring: it observes only. On its own it notifies no one
 - **No secrets in logs or audit.** The Discord token is never logged; delivery failures are logged by category only.
 - **Reliability is not security-critical state.** The queue is in memory. A crash or restart loses pending alerts (no persisted outbox), and delivery can duplicate a message after an ambiguous failure.
 - **Not an alarm.** Notifications are best-effort with a 10 minute staleness bound. Do not rely on them for life-safety.
+
+### Audit of refused administrator commands (v0.5.0)
+
+A refused administrator command (`permissions`, `audit`, `setup`, `sync`, `notifications`) is recorded as a *denied* audit row for: an allowed user who is not an administrator (`not_admin`), a stranger in the configured server (`not_allowed`), and any user of another server or a direct message (`wrong_guild`). A row holds the user ID, the command and subcommand **names** and a fixed reason; it never holds an option value (it may contain an entity ID or free text), an entity name, user text or Discord error text. Anything an attacker controls (the user ID, the guild ID, the names) is validated and replaced by a fixed word when it is not a Discord ID or a command-style name. The reply to the user does not change and reveals nothing about entities.
+
+It is bounded so that audit spam cannot exhaust SQLite or hide real events: a burst of three rows then one per minute per user, sixty rows per hour in total, the newest 5,000 rows kept, a replayed interaction recorded once, and dropped attempts folded into the next row as `suppressed=N`. A failed audit write is logged and cannot change the decision: the refusal was already made. Autocomplete, components, modals, unknown command names and non-administrator commands are not audited. A stranger who is refused is still logged as before (user and guild ID, no options).
+
+### Sensor semantics that matter for safety (v0.5.0)
+
+- **Hazard status is explicit.** Only the water leak class (`binary_sensor` with device class `moisture`, which Home Assistant documents as "on means wet") is a hazard: critical lane, immediate-only, announced at start-up. Smoke, gas and carbon monoxide are deliberately **not supported** until a dedicated safety policy exists. The `sensor` class `moisture` (a percentage) is not a leak sensor and is not monitored. A user can label any binary sensor `moisture` in Home Assistant; NeptHass trusts the label and treats it as a leak (over-alerting is the safe direction).
+- **Units never mix.** A threshold is bound to a documented unit; a reading in another unit is never compared with it.
+- **Unknown classes fail closed.** An unclassified sensor cannot be monitored or used in a rule.
 
 ## Reporting a vulnerability
 

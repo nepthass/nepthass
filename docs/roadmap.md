@@ -18,14 +18,14 @@ NeptHass is developed in small milestones. Each one is released only when it is 
 | v0.3.0 | Home Assistant WebSocket, real-time sensor monitoring, reconnection and reconciliation |
 | v0.4.0 | Smart notifications: rules, cooldowns, one alert channel, monitoring-down notices |
 
-## Next: v0.5.0 (design approved)
+## v0.5.0 (implemented, manual QA pending)
 
-**Theme: richer rules and safer start-up.** The five architecture decisions are approved and the [design](design/rules-v0.5.0.md) is written; implementation has not started. The milestone covers:
+**Theme: richer rules and safer start-up.** The [design](design/rules-v0.5.0.md) is implemented on `feature/v0.5.0` and verified by automated tests; the manual Discord checklist (group J in the [smoke tests](development/smoke-tests.md)) has not been run, and it is not released. It covers:
 
 - **Duration rules** ("the door has been open for 10 minutes") and **hysteresis** (a separate recovery threshold), with numeric thresholds bound to the sensor's unit so a unit change cannot cause false alerts.
-- **Initial-state alerting.** A critical hazard (water leak) that is already detected when NeptHass starts alerts immediately; other sensors already in an alert state are summarized once; duplicates across restarts are suppressed.
-- **Audit of unauthorized administrative command attempts.**
-- **A small typed sensor capability registry** that replaces the per-category switches spread over three packages (a prerequisite for the features above).
+- **Initial-state alerting.** A critical hazard (water leak) that is already detected when NeptHass starts alerts once; other conditions already present are summarized once; duplicates across restarts are suppressed.
+- **Audit of refused administrator commands.**
+- **A typed sensor capability registry**, and `garage_door` and `opening` sensors as its first additions.
 
 Not in v0.5.0: smoke, gas and carbon monoxide alerts (they need a deliberate safety decision first), quiet hours and a persisted outbox.
 

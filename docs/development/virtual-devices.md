@@ -11,12 +11,14 @@ The development Home Assistant (`dev/homeassistant/`) defines virtual devices wi
 | `binary_sensor.nepthass_dev_motion` | NeptHass Dev Motion | binary sensor | `motion` | | `off` (no motion) | read only |
 | `binary_sensor.nepthass_dev_door` | NeptHass Dev Door | binary sensor | `door` | | `off` (closed) | read only |
 | `binary_sensor.nepthass_dev_window` | NeptHass Dev Window | binary sensor | `window` | | `off` (closed) | read only |
+| `binary_sensor.nepthass_dev_garage_door` | NeptHass Dev Garage Door | binary sensor | `garage_door` | | `off` (closed) | read only |
+| `binary_sensor.nepthass_dev_opening` | NeptHass Dev Opening | binary sensor | `opening` | | `off` (closed) | read only |
 | `binary_sensor.nepthass_dev_water_leak` | NeptHass Dev Water Leak | binary sensor | `moisture` | | `off` (dry) | read only |
 | `sensor.nepthass_dev_temperature` | NeptHass Dev Temperature | sensor | `temperature` | `°C` | `21.5` | read only |
 | `sensor.nepthass_dev_humidity` | NeptHass Dev Humidity | sensor | `humidity` | `%` | `45` | read only |
 | `sensor.nepthass_dev_battery` | NeptHass Dev Battery | sensor | `battery` | `%` | `87` | read only |
 
-For binary sensors `on` means the condition is **active**: motion detected, door or window **open**, water detected. (Home Assistant calls the leak class `moisture`.)
+For binary sensors `on` means the condition is **active**: motion detected, door, window, garage door or opening **open**, water detected. (Home Assistant calls the leak class `moisture`.)
 
 The light and switch are real template entities. `light.turn_on`, `light.turn_off`, `switch.turn_on` and `switch.turn_off` run actual Home Assistant services that flip a backing helper, and the entity state is derived from that helper, like a device that reports back. They accept control from the Home Assistant UI, from the REST API and from NeptHass.
 
@@ -142,6 +144,8 @@ These are the situations monitoring observes and notifications (v0.4.0) react to
 | Door opened | run `scenario_door_opened` | `binary_sensor.nepthass_dev_door`: `off` to `on` |
 | Door closed (cancels "left open" timers) | turn `nepthass_dev_sim_door_open` off | `on` to `off` |
 | Window opened / closed | `scenario_window_opened`; turn `nepthass_dev_sim_window_open` off | `binary_sensor.nepthass_dev_window` |
+| Garage door / opening opened / closed | run `scenario_garage_door_opened` or `scenario_opening_opened`; turn `nepthass_dev_sim_garage_door_open` or `nepthass_dev_sim_opening_open` off | `binary_sensor.nepthass_dev_garage_door` or `binary_sensor.nepthass_dev_opening`: `off` to `on`, `on` to `off` |
+| Unit change (units must never mix) | **Settings > Devices & services > Entities > NeptHass Dev Temperature > Settings > Unit of measurement**: choose `°F`, later `°C` again | `sensor.nepthass_dev_temperature` reports `°F` with the converted value (21.5 becomes 70.7) |
 | Temperature above threshold | run `scenario_high_temperature` (31.2 °C) | `sensor.nepthass_dev_temperature`: `21.5` to `31.2` |
 | Temperature hysteresis | set `nepthass_dev_sim_temperature` to values such as 29.5, 30.5, 28.0 | numeric changes around a threshold |
 | Water leak | run `scenario_water_leak` | `binary_sensor.nepthass_dev_water_leak`: `off` to `on` |

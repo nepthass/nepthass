@@ -17,6 +17,8 @@ views:
           - binary_sensor.nepthass_dev_motion
           - binary_sensor.nepthass_dev_door
           - binary_sensor.nepthass_dev_window
+          - binary_sensor.nepthass_dev_garage_door
+          - binary_sensor.nepthass_dev_opening
           - binary_sensor.nepthass_dev_water_leak
           - sensor.nepthass_dev_temperature
           - sensor.nepthass_dev_humidity
@@ -28,6 +30,8 @@ views:
           - script.nepthass_dev_scenario_motion_detected
           - script.nepthass_dev_scenario_door_opened
           - script.nepthass_dev_scenario_window_opened
+          - script.nepthass_dev_scenario_garage_door_opened
+          - script.nepthass_dev_scenario_opening_opened
           - script.nepthass_dev_scenario_high_temperature
           - script.nepthass_dev_scenario_water_leak
           - script.nepthass_dev_scenario_low_battery
@@ -38,6 +42,8 @@ views:
           - input_boolean.nepthass_dev_sim_motion
           - input_boolean.nepthass_dev_sim_door_open
           - input_boolean.nepthass_dev_sim_window_open
+          - input_boolean.nepthass_dev_sim_garage_door_open
+          - input_boolean.nepthass_dev_sim_opening_open
           - input_boolean.nepthass_dev_sim_leak
           - input_number.nepthass_dev_sim_temperature
           - input_number.nepthass_dev_sim_humidity
@@ -48,6 +54,8 @@ views:
           - input_boolean.nepthass_dev_offline_motion
           - input_boolean.nepthass_dev_offline_door
           - input_boolean.nepthass_dev_offline_window
+          - input_boolean.nepthass_dev_offline_garage_door
+          - input_boolean.nepthass_dev_offline_opening
           - input_boolean.nepthass_dev_offline_temperature
           - input_boolean.nepthass_dev_offline_humidity
           - input_boolean.nepthass_dev_offline_leak
