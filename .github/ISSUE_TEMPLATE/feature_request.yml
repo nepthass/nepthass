@@ -2,10 +2,6 @@ name: Feature request
 description: Propose an improvement
 labels: [enhancement]
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Please read the [roadmap](../blob/main/docs/roadmap.md) first: proposals that fit the current milestone are easier to accept.
   - type: textarea
     id: problem
     attributes:
