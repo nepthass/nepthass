@@ -29,7 +29,7 @@ docker compose config --quiet
 docker build -t nepthass:dev .
 ```
 
-CI runs the same checks. To try NeptHass against a real Home Assistant without any hardware, use the local development environment in [docs/development/setup.md](docs/development/setup.md); the integration tests behind the `integration` build tag run against it, and [docs/development/smoke-tests.md](docs/development/smoke-tests.md) describes them and the manual Discord checklist. Tests must **never** need live Discord or Home Assistant credentials: use `httptest` servers (see `tests/fakeha`) and temporary SQLite files (`t.TempDir()`). Tests must be deterministic: no fixed sleeps, wait on the event or state you care about with a bounded timeout. Assert behavior and machine-consumed values, not prose.
+CI runs the same checks. To try NeptHass against a real Home Assistant without hardware, use the isolated environment in [docs/development.md](docs/development.md). Tests must **never** need live Discord or Home Assistant credentials: use `httptest` servers (see `tests/fakeha`) and temporary SQLite files (`t.TempDir()`). Tests must be deterministic: no fixed sleeps, wait on the event or state you care about with a bounded timeout. Assert behavior and machine-consumed values, not prose.
 
 ## Code style
 
@@ -67,7 +67,7 @@ Open an issue using the bug report form with: NeptHass version (`nepthass versio
 
 ## Proposing features
 
-Open an issue first for anything beyond a small fix, describing the problem you want solved (not only the solution), who it is for, and any security impact. Work follows the milestones in the [roadmap](docs/roadmap.md); a proposal that fits the current milestone is easier to accept than a new direction. Larger changes should come with a short design note like the ones in [docs/design/](docs/design/).
+Open an issue first for anything beyond a small fix, describing the problem you want solved, who it is for, and any security impact. Larger changes should explain their architecture and security tradeoffs in the issue or pull request.
 
 ## Pull request workflow
 

@@ -2,143 +2,124 @@
 
 **Your Home. Your Command.**
 
-NeptHass is a secure, self-hosted, Discord-first control and monitoring bridge for [Home Assistant](https://www.home-assistant.io/). It runs next to Home Assistant on your own machine, talks to it over the local network, and lets the people you choose check and control selected devices, and receive alerts about selected sensors, from Discord.
+NeptHass is a secure, self-hosted Discord bridge for [Home Assistant](https://www.home-assistant.io/). It lets approved people view selected entities, control selected lights and switches, monitor sensors, and receive alerts without exposing Home Assistant to the internet.
 
-NeptHass does not replace Home Assistant and has no device drivers. It works through Home Assistant entities and its APIs, and your Home Assistant automations keep working whether or not Discord is reachable.
+NeptHass is an independent community project and is not affiliated with Home Assistant, Nabu Casa, or Discord.
 
-> NeptHass is an independent community project. It is not affiliated with, endorsed by, or sponsored by Home Assistant (Nabu Casa) or Discord, and it does not use their logos.
+## Features
 
-## Why it exists
+- Deny-by-default, per-entity sharing with `read` or `control` access.
+- Control limited to lights and switches.
+- Guided `/setup`, aliases, synchronization, and audit logging.
+- Live monitoring for supported temperature, humidity, battery, motion, door, window, opening, garage-door, and water-leak sensors.
+- Best-effort Discord notifications with duration rules, hysteresis, unit-safe thresholds, cooldowns, and monitoring-down notices.
+- Outbound-only connections to Discord and Home Assistant.
+- SQLite persistence, non-root container, read-only root filesystem, dropped capabilities, and secret redaction.
 
-You often want your family or housemates to check a sensor or switch a light without giving them a Home Assistant account, and you do not want to expose Home Assistant to the internet to do it. NeptHass is a small bridge for that: it makes only outbound connections, shares **nothing by default**, and lets an administrator decide, entity by entity, what each person may see or control, all from Discord.
-
-## What it does
-
-- **Control** lights and switches with `/control`. Every other kind of device is read-only at most.
-- **Share explicitly.** An entity is invisible until an administrator shares it at `read` or `control` level, with a guided `/setup` wizard, aliases and an audit log.
-- **Monitor live.** A persistent connection to the Home Assistant WebSocket tracks temperature, humidity, battery, motion, door, window and water-leak sensors; `/sensors` shows them, and `/health` says honestly whether monitoring is live.
-- **Notify.** Administrators choose one Discord text channel and create rules (a door, window, garage door or opening opens, motion, a leak, a low battery, a value above or below a threshold), optionally **only after the condition has held for a while** and with a **separate recovery value** so a reading hovering around a threshold does not repeat. Thresholds are tied to the sensor's unit. NeptHass also tells that channel when it has lost sight of Home Assistant. Alerts never ping anyone and respect sharing at every step.
-- **Stay private.** No listening ports, secrets only in the environment, secret redaction in logs, replies visible only to the person who asked.
-
-## Project maturity
-
-NeptHass is preparing for its first stable release. Its product scope is deliberately focused: a self-hosted Discord interface for selected Home Assistant entities, monitoring and notifications. Each release is verified by automated tests, including a suite that runs against a real Home Assistant, and by manual testing on a Discord test server. Manual coverage is partial for v0.4.0; see [the known gaps](docs/development/smoke-tests.md#known-gaps).
-
-**Notifications are best-effort, not an alarm system.** Delivery has a bounded staleness (10 minutes) and can occasionally duplicate. Queued alerts are kept in memory, so a crash or restart loses what was waiting. When NeptHass starts it cannot know when a condition began: a water leak that is already wet is announced once (as what Home Assistant reports, not as a new event) and other conditions are listed in one start-up summary. Do not rely on notifications for life-safety. Details and guarantees: [docs/design/notifications.md](docs/design/notifications.md).
-
-| Version | Scope | Status |
-| --- | --- | --- |
-| v0.1.0 | Foundation: configuration, Discord connection, Home Assistant REST client, SQLite, authorization, basic commands, Docker | Released |
-| v0.2.0 | Interactive `/setup` wizard, entity discovery, aliases, `/sync` | Released |
-| v0.3.0 | Home Assistant WebSocket, real-time sensor monitoring | Released |
-| v0.4.0 | Smart notifications and monitoring-down notices | Released |
-| v0.5.0 | Richer rules and safer start-up: durations, hysteresis, unit-safe thresholds, start-up alerting, audit of refused commands, garage door and opening sensors | Released |
-| v1.0.0 | Stable Discord-only product; release-readiness hardening and documentation | In preparation |
-
-Release history: [CHANGELOG.md](CHANGELOG.md).
+> Notifications are not a life-safety alarm. Discord delivery can be delayed, duplicated, or lost during an outage or restart.
 
 ## How it works
 
 ```text
-Discord  <-- gateway (outbound) -->  NeptHass  <-- REST + WebSocket (local) -->  Home Assistant  <-->  devices
-   ^                                    |
-   '---- alerts over REST (outbound) ---+--- SQLite (/data)
+Discord <-- outbound gateway/REST --> NeptHass <-- local REST/WebSocket --> Home Assistant
+                                      |
+                                      `-- SQLite data volume
 ```
 
-NeptHass only makes outbound connections: nothing listens on a port and Home Assistant is never exposed to the internet. See [docs/architecture.md](docs/architecture.md).
+## Run with Docker — no repository clone
 
-## Quick start
+Version tags publish images to GitHub Container Registry. After the first public release image is available, create `nepthass.env` with the required values:
 
-Requirements: Linux, Docker Engine with Compose, a running Home Assistant, a Discord server where you can add bots.
+```env
+DISCORD_BOT_TOKEN=
+DISCORD_APPLICATION_ID=
+DISCORD_GUILD_ID=
+DISCORD_ADMIN_USER_IDS=
+HA_TOKEN=
+HA_URL=http://127.0.0.1:8123
+```
 
-1. **Create the Discord bot.** In the [Discord Developer Portal](https://discord.com/developers/applications) create an application, add a bot, and copy the bot token and the application ID.
-2. **Create a Home Assistant token.** Profile page, Security, Long-Lived Access Tokens.
-3. **Collect IDs.** In Discord enable Developer Mode, then copy your server (guild) ID and your user ID.
-4. **Configure.**
-   ```bash
-   git clone https://github.com/nepthass/nepthass.git && cd nepthass
-   cp .env.example .env
-   # edit .env: DISCORD_BOT_TOKEN, DISCORD_APPLICATION_ID, DISCORD_GUILD_ID,
-   #            DISCORD_ADMIN_USER_IDS, HA_TOKEN
-   ```
-5. **Invite the bot** to your server (replace `APPLICATION_ID`):
-   `https://discord.com/oauth2/authorize?client_id=APPLICATION_ID&scope=bot%20applications.commands&permissions=0`
-6. **Run it.**
-   ```bash
-   docker compose up -d --build
-   docker compose logs -f nepthass
-   ```
-7. **Share devices.** In Discord run `/setup`, pick the entities to share, choose read or control, optionally add aliases, review and confirm. Then try `/devices`, `/status` and `/control`.
-8. **Optional: alerts.** Run `/notifications channel` to pick a private text channel, then `/notifications add` for a sensor. The bot needs View Channel, Send Messages and Embed Links in that channel.
+Then run:
 
-The full walkthrough, bridge-network setup, secret files and upgrade notes are in [docs/setup.md](docs/setup.md).
+```bash
+docker volume create nepthass-data
+
+docker run -d \
+  --name nepthass \
+  --restart unless-stopped \
+  --network host \
+  --env-file nepthass.env \
+  -v nepthass-data:/data \
+  --read-only \
+  --tmpfs /tmp \
+  --cap-drop ALL \
+  --security-opt no-new-privileges \
+  ghcr.io/nepthass/nepthass:latest
+```
+
+This command is intended for Linux. Docker Desktop users should set `HA_URL=http://host.docker.internal:8123` and omit `--network host` if host networking is unavailable.
+
+Use a versioned image such as `ghcr.io/nepthass/nepthass:1.0.0` for predictable upgrades. The `latest` tag follows the newest stable release.
+
+Full setup instructions: [docs/setup.md](docs/setup.md).
 
 ## Commands
 
-| Command | Who | What it does |
+| Command | Access | Purpose |
 | --- | --- | --- |
-| `/ping` | users | Check the bot responds; shows gateway latency |
-| `/health` | users | Discord, Home Assistant REST, live monitoring (WebSocket), notifications and database status |
-| `/devices [page]` | users | List the entities shared with you |
-| `/sensors [page]` | users | Live readings of the monitored sensors shared with you |
-| `/status entity` | users | Show an entity's state (needs `read` or `control` access) |
-| `/control entity action` | users | Turn a light or switch on or off (needs `control` access) |
-| `/setup` | admins | Guided wizard: discover entities, share them, set aliases |
-| `/sync` | admins | Refresh the view of Home Assistant's entities |
-| `/permissions allow\|revoke\|list` | admins | Manage which entities are shared and at what level |
-| `/notifications channel\|add\|list\|pause\|resume\|remove\|unit\|test\|status` | admins | Configure and monitor alerts |
-| `/audit [count]` | admins | Recent control attempts and configuration changes |
+| `/ping` | users | Check bot responsiveness |
+| `/health` | users | Show Discord, Home Assistant, monitoring, notifications, and database health |
+| `/devices` | users | List shared entities |
+| `/sensors` | users | Show live readings from shared supported sensors |
+| `/status` | users | Show an entity state |
+| `/control` | users | Turn an authorized light or switch on or off |
+| `/setup` | admins | Discover entities and configure sharing and aliases |
+| `/sync` | admins | Refresh Home Assistant entities |
+| `/permissions` | admins | Grant, list, or revoke entity access |
+| `/notifications` | admins | Configure and inspect alerts |
+| `/audit` | admins | Review recent actions and denials |
 
-"Users" are the administrators plus anyone in `DISCORD_ALLOWED_USER_IDS`. Aliases work wherever an entity is expected. Full reference: [docs/commands.md](docs/commands.md).
+See [docs/commands.md](docs/commands.md) for command options and behavior.
 
 ## Configuration
 
-All bootstrap settings are environment variables (see [.env.example](.env.example)). Secrets are never entered in Discord.
-
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `DISCORD_BOT_TOKEN` / `_FILE` | yes | | Bot token (or path of a file containing it) |
-| `DISCORD_APPLICATION_ID` | yes | | Discord application ID |
-| `DISCORD_GUILD_ID` | yes | | The one server NeptHass serves |
-| `DISCORD_ADMIN_USER_IDS` | yes | | Comma-separated administrator user IDs |
-| `DISCORD_ALLOWED_USER_IDS` | no | none | Comma-separated non-admin user IDs |
-| `DISCORD_COMMAND_SCOPE` | no | `guild` | `guild` or `global` command registration |
+| `DISCORD_BOT_TOKEN` / `_FILE` | yes | — | Discord bot token or secret-file path |
+| `DISCORD_APPLICATION_ID` | yes | — | Discord application ID |
+| `DISCORD_GUILD_ID` | yes | — | The Discord server NeptHass serves |
+| `DISCORD_ADMIN_USER_IDS` | yes | — | Comma-separated administrator IDs |
+| `DISCORD_ALLOWED_USER_IDS` | no | none | Comma-separated regular-user IDs |
+| `HA_TOKEN` / `_FILE` | yes | — | Home Assistant long-lived token or secret-file path |
 | `HA_URL` | no | `http://127.0.0.1:8123` | Home Assistant base URL |
-| `HA_TOKEN` / `_FILE` | yes | | Long-Lived Access Token (or file) |
-| `HA_REQUEST_TIMEOUT` | no | `10s` | Per-request timeout (1s to 2m) |
-| `DATABASE_PATH` | no | `data/nepthass.db` (`/data/nepthass.db` in the image) | SQLite file |
-| `AUDIT_RETENTION_DAYS` | no | `90` | Audit log retention (1 to 3650) |
-| `LOG_LEVEL` / `LOG_FORMAT` | no | `info` / `text` | `debug`..`error`; `text` or `json` |
+| `DATABASE_PATH` | no | `/data/nepthass.db` | SQLite database path |
+| `AUDIT_RETENTION_DAYS` | no | `90` | Audit retention, 1–3650 days |
+| `LOG_LEVEL` / `LOG_FORMAT` | no | `info` / `json` | Logging configuration |
 
-`HA_URL` is also used for the WebSocket (`http` becomes `ws`, `https` becomes `wss`, a path prefix is kept). If Home Assistant is behind a reverse proxy it must allow WebSocket upgrades on `/api/websocket`. Notification settings (the alert channel and the rules) are stored in the database and managed with `/notifications`, not through environment variables.
-
-## Security
-
-Read-only by default, an explicit per-entity allowlist, control limited to `light` and `switch`, administrator and guild allowlists checked on every interaction, secrets redacted from logs, no listening ports, live sensor data readable only through a per-read permission check, and administrator-only notification settings. Everyone who can read the alert channel sees the alerts, so use a private channel. Details and hardening advice: [docs/security.md](docs/security.md). Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+See [.env.example](.env.example) for every option.
 
 ## Documentation
 
-| Topic | Where |
-| --- | --- |
-| Install, configure, upgrade, back up | [docs/setup.md](docs/setup.md) |
-| Command reference | [docs/commands.md](docs/commands.md) |
-| Architecture and design records | [docs/architecture.md](docs/architecture.md), [docs/design/](docs/design/) |
-| Security model | [docs/security.md](docs/security.md) |
-| Troubleshooting | [docs/troubleshooting.md](docs/troubleshooting.md) |
-| Roadmap | [docs/roadmap.md](docs/roadmap.md) |
-| Contributing and local development | [CONTRIBUTING.md](CONTRIBUTING.md), [docs/development/setup.md](docs/development/setup.md) |
+- [Setup, upgrades, backups, and rollback](docs/setup.md)
+- [Discord command reference](docs/commands.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Security model](docs/security.md)
+- [Architecture](docs/architecture.md)
+- [Development and testing](docs/development.md)
+- [Contributing](CONTRIBUTING.md)
+- [Release history](CHANGELOG.md)
 
 ## Development
 
 ```bash
-gofmt -l .                              # must print nothing
+gofmt -l .
 go vet ./...
 go test -race -shuffle=on -count=1 ./...
 docker compose config --quiet
 docker build -t nepthass:dev .
 ```
 
-No Go toolchain locally? Run the Go commands in a container: `docker run --rm -v "$PWD":/src -w /src golang:1.27 go test ./...`. Tests use mock servers and temporary SQLite files; they never need Discord or Home Assistant credentials. No Home Assistant hardware? `compose.dev.yaml` starts a real Home Assistant with virtual devices in an isolated Compose project; see [docs/development/setup.md](docs/development/setup.md). Contribution rules: [CONTRIBUTING.md](CONTRIBUTING.md).
+See [docs/development.md](docs/development.md) for the isolated Home Assistant integration environment.
 
 ## License
 

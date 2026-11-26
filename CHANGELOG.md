@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Public documentation is consolidated into setup, commands, troubleshooting, security, architecture, and development guides; historical readiness reports and internal planning notes were removed.
 - **Neutral sensor state rendering.** `/status`, `/devices`, `/control` and the `/setup` discovery list no longer show a green check mark for a reading, because "on" is not healthy (an open door, water detected). A real reading now carries an information mark, a supported sensor type shows its meaning from the registry (for example `open (on)`), every other entity shows its raw state with no interpretation, and unavailable or unknown readings keep the warning mark and "(not reporting)".
 - **Notification wording is owned by the sensor registry.** The alert and duration wording of each sensor type now lives in its registry row instead of a shared meaning, so a new type can never inherit another type's text. The wording of every existing type is unchanged and is pinned by regression tests.
 
@@ -17,7 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [0.5.0] - 2026-10-31
 
-Fifth milestone: richer rules and safer start-up. Verified by 474 automated tests, 48 tests against a real Home Assistant and the mandatory real-Discord smoke checks; see the [release readiness report](docs/development/v0.5.0-release-readiness.md).
+Fifth milestone: richer rules and safer start-up. Verified by 474 automated tests, 48 tests against a real Home Assistant and the mandatory real-Discord smoke checks.
 
 ### Added
 
@@ -48,7 +49,7 @@ Fifth milestone: richer rules and safer start-up. Verified by 474 automated test
 - Duration counts are in memory: after a restart or a monitoring outage they restart, so an alert can be later than the real duration (never earlier).
 - Smoke, gas and carbon monoxide are not supported; they need a dedicated safety policy.
 - No persisted outbox, a 10 minute staleness bound, one alert channel and possible duplicates remain as in v0.4.0.
-- Real-Discord QA covered the mandatory smoke checks only (start-up alerts and summary, authorization and audit). The optional check for a channel without Send Messages (V32) was not run, and the other rows of group J are verified by automated tests against a stub Discord server; see [docs/development/smoke-tests.md](docs/development/smoke-tests.md).
+- Real-Discord QA covered the mandatory smoke checks only (start-up alerts and summary, authorization and audit). The optional check for a channel without Send Messages was not run; the remaining delivery behavior is covered by automated tests against a stub Discord server.
 
 ## [0.4.0] - 2026-10-30
 
@@ -63,7 +64,7 @@ Fourth milestone: smart notifications.
 - `/notifications` (administrators, guild-only, ephemeral): `channel`, `add`, `list`, `pause`, `resume`, `remove`, `test`, `status`, with autocomplete limited to shared, monitored sensors. Channel validation: the channel exists, belongs to the configured guild, is a text channel, and the bot has View Channel, Send Messages and Embed Links.
 - A notification line in `/health` and detailed delivery health in `/notifications status`.
 - Interaction parsing for Channel and Number options; any other option type makes the request fail visibly instead of running without it.
-- Documentation: [docs/design/notifications.md](docs/design/notifications.md), command reference, security notes, troubleshooting and a real-Discord manual QA checklist.
+- Documentation: command reference, security notes, troubleshooting and manual QA guidance.
 
 ### Changed
 
@@ -91,7 +92,7 @@ Fourth milestone: smart notifications.
 - There is **no persisted outbox**: queued alerts are lost on a crash or restart. Delivery is best-effort with possible duplicates and a 10 minute TTL.
 - A first observation is silent, so a leak that is already wet when NeptHass starts or when its rule is created is not announced.
 - One alert channel per server; no direct messages, quiet hours or rule logic (v0.5.0).
-- Real Discord was exercised manually by the maintainer on a test server (partial; see the [known gaps](docs/development/smoke-tests.md#known-gaps)). Not exercised against real Discord: an actual HTTP 429, a Discord-only outage and a second user; those are covered by stub-server tests. The v0.3.0 to v0.4.0 downgrade test is deferred while the project is in private pre-v1.0.0 development.
+- Real Discord was exercised manually by the maintainer on a test server. Not exercised against real Discord: an actual HTTP 429, a Discord-only outage and a second user; those are covered by stub-server tests. The v0.3.0 to v0.4.0 downgrade test was deferred during pre-v1.0.0 development.
 - A non-administrator's refused `/notifications` command is not audited (the command gate does not audit refusals for any administrator command).
 
 ## [0.3.0] - 2026-10-29

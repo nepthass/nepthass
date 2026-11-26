@@ -2,11 +2,11 @@
 
 ## Supported versions
 
-NeptHass is pre-1.0. Only the latest release receives security fixes.
+Only the latest stable release receives security fixes.
 
 | Version | Supported |
 | --- | --- |
-| latest 0.x release | yes |
+| latest stable release | yes |
 | older releases | no |
 
 ## Reporting a vulnerability

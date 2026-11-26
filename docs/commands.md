@@ -102,7 +102,7 @@ Fetches Home Assistant's entities and reports: how many there are, how many can 
 
 ## /notifications
 
-`/notifications <subcommand>` (administrators, guild-only; every reply is ephemeral) configures alerts for shared sensors. Notifications are **disabled until a channel is set**. Design and guarantees: [design/notifications.md](design/notifications.md).
+`/notifications <subcommand>` (administrators, guild-only; every reply is ephemeral) configures alerts for shared sensors. Notifications are **disabled until a channel is set**. Reliability and privacy limits are summarized in [security.md](security.md).
 
 | Subcommand | What it does |
 | --- | --- |
