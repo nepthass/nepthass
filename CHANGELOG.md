@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Release-tag workflow for multi-platform GitHub Container Registry images with SBOM and provenance attestations, enabling installation with `docker run` and no repository clone.
+
 ### Changed
 
 - Public documentation is consolidated into setup, commands, troubleshooting, security, architecture, and development guides; historical readiness reports and internal planning notes were removed.
