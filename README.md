@@ -7,10 +7,10 @@
 **Control and monitor Home Assistant directly from Discord.**
 
 [![CI](https://github.com/nepthass/nepthass/actions/workflows/ci.yml/badge.svg)](https://github.com/nepthass/nepthass/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/nepthass/nepthass?display_name=tag)](https://github.com/nepthass/nepthass/releases)
+[![Release](https://img.shields.io/github/v/release/nepthass/nepthass?display_name=tag&v=2)](https://github.com/nepthass/nepthass/releases)
 [![Container](https://img.shields.io/badge/container-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/nepthass/nepthass/pkgs/container/nepthass)
-[![Go](https://img.shields.io/github/go-mod/go-version/nepthass/nepthass?logo=go)](go.mod)
-[![License](https://img.shields.io/github/license/nepthass/nepthass)](LICENSE)
+[![Go](https://img.shields.io/github/go-mod/go-version/nepthass/nepthass?logo=go&v=2)](go.mod)
+[![License](https://img.shields.io/github/license/nepthass/nepthass?v=2)](LICENSE)
 
 [Get started](#quick-start) · [Commands](#discord-commands) · [Documentation](#documentation)
 
