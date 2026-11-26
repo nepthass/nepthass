@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-26
+
+First stable Discord-only release, validated against Home Assistant 2026.10.4 and a dedicated Discord test guild.
+
 ### Added
 
 - Release-tag workflow for multi-platform GitHub Container Registry images with SBOM and provenance attestations, enabling installation with `docker run` and no repository clone.
@@ -211,7 +215,8 @@ First milestone: the foundation.
 - A single Discord guild is supported.
 - `/devices` lists 10 entities per page via a `page` option.
 
-[Unreleased]: https://github.com/nepthass/nepthass/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/nepthass/nepthass/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/nepthass/nepthass/compare/v0.5.0...v1.0.0
 [0.5.0]: https://github.com/nepthass/nepthass/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/nepthass/nepthass/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nepthass/nepthass/compare/v0.2.0...v0.3.0
