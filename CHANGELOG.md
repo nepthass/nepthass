@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Updated `github.com/gorilla/websocket` to the upstream security fix for `GO-2026-6278` (WebSocket masking used a weak pseudo-random source).
 - **Type lists follow the registry.** Two user-facing lists of supported sensor types omitted garage door and opening. They are now generated from the registry, so a future type cannot be left out.
 
 ## [0.5.0] - 2026-10-31
